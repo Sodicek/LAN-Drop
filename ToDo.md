@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-alpha.4**. An alpha number does not mean every release gate has passed.
+Current build: **0.2.0-alpha.5**. An alpha number does not mean every release gate has passed.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -13,6 +13,7 @@ Current build: **0.2.0-alpha.4**. An alpha number does not mean every release ga
 - [x] Owned outbox crash cleanup, reparse-point checks and free-space checks.
 - [ ] Incomplete inbox recovery after a crash and stronger atomic path handling.
 - [ ] Physical iPhone: 20 photos to PC and a video back.
+- [ ] Physical Android/Chrome: photos, videos, documents, Downloads and interrupted transfers.
 - [x] Desktop start-time network profile gate.
 - [x] Periodic desktop profile/address monitoring with automatic shutdown.
 - [ ] Actual firewall and network-change testing on physical devices.
@@ -23,6 +24,7 @@ Current build: **0.2.0-alpha.4**. An alpha number does not mean every release ga
 - [x] Persistent destination folder, interface preference and language.
 - [x] Notification-area access; explicit hide vs shutdown.
 - [x] English/Czech/Automatic and translation parity tests.
+- [x] Android/iPhone browser guidance, phone override and upload capability checks.
 - [x] Portable preview packaging script and Windows CI.
 - [ ] Desktop interaction tests on a clean Windows machine.
 - [x] Better server-start diagnosis and network profile information.
@@ -50,7 +52,7 @@ Current build: **0.2.0-alpha.4**. An alpha number does not mean every release ga
 - [ ] Installer and code signing.
 - [ ] Diagnostic export with redaction.
 - [ ] Clean-machine portable/install/upgrade tests.
-- [ ] Real iOS/network compatibility matrix.
+- [ ] Real Android/iOS/network compatibility matrix.
 
 ## 1.0.0 — stable
 - [ ] Secure transport and update trust requirements satisfied.

@@ -6,16 +6,35 @@ let token = sessionStorage.getItem('landrop-session');
 let pairCode = fragment.get('pair');
 history.replaceState(null, '', location.pathname);
 let busy = false, cancelled = false, current = null, offerCancellation = null, qrUrl = null, qrAddress = null, lastState = null;
+let platformPreference = 'auto', customDeviceName = false;
+try { platformPreference = MobileUX.normalizePreference(localStorage.getItem('landrop-platform')); } catch {}
+const uploadSupport = MobileUX.uploadCapabilities(globalThis);
+function applyMobileUX() {
+  const platform = MobileUX.resolvePlatform(platformPreference, navigator);
+  $('platform').value = platformPreference;
+  $('mobile-help').hidden = Boolean(admin);
+  $('browser-help').textContent = t(platform === 'android' ? 'androidBrowserHelp' : platform === 'ios' ? 'iosBrowserHelp' : 'otherBrowserHelp');
+  $('download-help').hidden = Boolean(admin);
+  $('download-help').textContent = t(platform === 'android' ? 'androidDownloadHelp' : platform === 'ios' ? 'iosDownloadHelp' : 'otherDownloadHelp');
+  if(!customDeviceName && MobileUX.isDefaultDeviceName($('device-name').value)) $('device-name').value = MobileUX.defaultDeviceName(platform, locale());
+  $('capability-notice').hidden = uploadSupport.supported;
+  $('capability-notice').textContent = t('uploadUnsupported');
+  $('file-input').disabled = busy || !uploadSupport.supported;
+  $('drop').setAttribute('aria-disabled', String(!uploadSupport.supported));
+  $('drop').classList.toggle('disabled', !uploadSupport.supported);
+  if(admin && !uploadSupport.supported) { $('capability-notice').hidden = false; $('transfer').prepend($('capability-notice')); }
+}
 const headers = () => admin ? {'X-LanDrop-Admin': admin} : {'X-LanDrop-Session': token || ''};
 function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
 async function api(path, options = {}) {
-  const deadline = new AbortController();
-  const cancel = () => deadline.abort();
+  if(typeof fetch !== 'function') throw new Error(t('browserUnsupported'));
+  const deadline = typeof AbortController === 'function' ? new AbortController() : null;
+  const cancel = () => deadline?.abort();
   options.signal?.addEventListener('abort', cancel, {once:true});
   if(options.signal?.aborted) cancel();
   const timer = setTimeout(cancel, 15000);
   try {
-    const response = await fetch(path, {...options, signal:deadline.signal, headers: {...headers(), ...options.headers}});
+    const response = await fetch(path, {...options, signal:deadline?.signal, headers: {...headers(), ...options.headers}});
     if (!response.ok) { let body; try { body = await response.json(); } catch {} throw new Error(errorMessage(body, response.status)); }
     const text = await response.text(); return text ? JSON.parse(text) : null;
   } catch(error) {
@@ -122,6 +141,7 @@ function upload(file, index, count, recipientId, offerId, sha256) {
   });
 }
 async function send(files) {
+  if(!uploadSupport.supported) { notice(t('uploadUnsupported'), true); return; }
   if(busy || !files.length) return;
   const recipientId = admin ? $('recipient').value : null;
   if(admin && !recipientId) { notice(t('noRecipient'), true); return; }
@@ -157,21 +177,25 @@ async function send(files) {
     if(!cancelled) notice(t(admin ? 'outgoingDone' : 'done'));
     await refresh();
   } catch(e) { notice(e.name === 'AbortError' ? t('cancelled') : e.code ? t(e.code) : translations.en[e.message] ? t(e.message) : e.message,true); }
-  finally { current = null; busy = false; $('recipient').disabled = false; $('file-input').disabled = false; $('file-input').value = ''; $('progress-area').hidden = true; }
+  finally { current = null; busy = false; $('recipient').disabled = false; $('file-input').disabled = !uploadSupport.supported; $('file-input').value = ''; $('progress-area').hidden = true; }
 }
 $('file-input').onchange = e => send([...e.target.files]);
 $('cancel').onclick = () => { cancelled = true; offerCancellation?.abort(); current?.abort(); };
-$('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('drag'); };
+$('drop').ondragover = e => { e.preventDefault(); if(uploadSupport.supported) $('drop').classList.add('drag'); };
 $('drop').ondragleave = () => $('drop').classList.remove('drag');
-$('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('drag'); send([...e.dataTransfer.files]); };
+$('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('drag'); if(uploadSupport.supported) send([...e.dataTransfer.files]); };
 $('address').onchange = () => qr().catch(e=>notice(e.message,true));
 $('renew').onclick = async () => { try { await post('/api/admin/pairing'); await qr(); await refresh(); notice(t('qrReady')); } catch(e) { notice(e.message,true); } };
 $('folder').oninput = () => $('folder').dataset.edited = 'true';
 $('folder-form').onsubmit = async e => { e.preventDefault(); try { await post('/api/admin/folder',{path:$('folder').value}); delete $('folder').dataset.edited; await refresh(); notice(t('folderChanged')); } catch(e) { notice(e.message,true); } };
 $('pair-form').onsubmit = async e => { e.preventDefault(); const b = e.target.querySelector('button'); b.disabled = true; try { const r = await post('/api/pair',{code:pairCode,name:$('device-name').value}); token = r.token; sessionStorage.setItem('landrop-session',token); $('pair').hidden = true; notice(t('confirmPc')); await refresh(); } catch(e) { notice(e.message,true); } finally { b.disabled = false; } };
 applyLanguage();
-$('language').onchange = () => { setLanguage($('language').value); refresh(lastState).catch(e=>notice(e.message,true)); const qrImage = $('qr').querySelector('img'); if(qrImage) qrImage.alt = t('qrAlt'); };
+applyMobileUX();
+$('device-name').oninput = () => { customDeviceName = true; };
+$('platform').onchange = () => { platformPreference = MobileUX.normalizePreference($('platform').value); try { localStorage.setItem('landrop-platform', platformPreference); } catch {} applyMobileUX(); };
+$('language').onchange = () => { setLanguage($('language').value); applyMobileUX(); refresh(lastState).catch(e=>notice(e.message,true)); const qrImage = $('qr').querySelector('img'); if(qrImage) qrImage.alt = t('qrAlt'); };
 if (pairCode && !admin) { token = null; sessionStorage.removeItem('landrop-session'); $('pair').hidden = false; }
 else if(!admin && !token) $('welcome').hidden = false;
 else refresh().catch(e=>notice(e.message,true));
-setInterval(()=>{ if(admin || token) refresh().catch(e=>notice(e.message,true)); },3000);
+if(typeof fetch !== 'function') notice(t('browserUnsupported'), true);
+else setInterval(()=>{ if(admin || token) refresh().catch(e=>notice(e.message,true)); },3000);

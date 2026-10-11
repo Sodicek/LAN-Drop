@@ -1,6 +1,6 @@
 {
   "Subtitle": "Soubory mezi počítačem a telefonem. Přímo po místní síti.",
-  "SecurityNote": "Vývojový náhled: HTTP není šifrované. Používej důvěryhodnou privátní síť. Nech Safari během přenosu otevřené.",
+  "SecurityNote": "Vývojový náhled: HTTP není šifrované. Používej důvěryhodnou privátní síť. Nech prohlížeč v telefonu během přenosu otevřený.",
   "NetworkLabel": "Před zapnutím sdílení vyber síťový adaptér.",
   "Connect": "Připojit telefon",
   "Folder": "Složka pro příjem",

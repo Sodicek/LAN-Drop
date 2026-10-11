@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0-alpha.5 — 2026-10-11
+
+### Added
+- Android Chrome and iPhone Safari guidance in the shared browser client.
+- Automatic phone detection, a persistent manual override and localized suggested phone names.
+- Browser upload capability checks with readable fallback instructions; download access remains available.
+- English/Czech Android setup guides and an expanded physical-device test matrix.
+- Chromium Android emulation tests for pairing, checksum-worker uploads, acceptance/cancellation and Unicode downloads.
+
+### Changed
+- Phone-facing branding and desktop instructions now cover Android and iPhone.
+- Device naming preserves user-entered names when platform or language changes.
+
+### Known gaps
+- Physical Android/iPhone camera, file-picker, download and background tests remain pending.
+- This is a browser client, with no APK or guaranteed background transfer. HTTP remains unencrypted.
+
 ## 0.2.0-alpha.4 — 2026-10-11
 
 ### Added

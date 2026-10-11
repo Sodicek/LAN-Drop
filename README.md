@@ -2,7 +2,7 @@
 
 **Send files between Windows and your phone over a local network.**
 
-LAN Drop is an early development preview built with C# / .NET 10. The Windows app generates a QR code; the phone connects in Safari without an account or a native iOS app. Files stay on your devices.
+LAN Drop is an early development preview built with C# / .NET 10. The Windows app generates a QR code; Android connects in Chrome and iPhone connects in Safari, without an account or an installed phone app. Files stay on your devices. Physical-device compatibility checks are still pending.
 
 **This preview uses unencrypted HTTP. Use a trusted private network only. It is not a stable or security-hardened release.** Publishing the source does not mean the public-release requirements in the product design are complete.
 
@@ -17,6 +17,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 - Streaming to disk with duplicate-name protection, Windows filename checks and incomplete-upload cleanup.
 - Destination folder dialog, persistent folder/network/language preferences and notification-area access.
 - English and Czech on Windows and the web; automatic language option and English fallback.
+- Android/iPhone guidance, automatic phone detection with a manual override, and upload capability checks.
 - Default loopback-only server; optional single selected IPv4 interface for phone access.
 - Upload concurrency and per-run byte/file limits.
 - Desktop network diagnostics, a start-time private/domain profile gate and periodic monitoring that stops unsafe sharing.
@@ -24,7 +25,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 
 ## Run from source
 
-Requirements: **Windows and .NET 10 SDK**. Windows 11 x64 is the initial target; physical iPhone testing is still pending.
+Requirements: **Windows and .NET 10 SDK**. Phone targets: current Chrome on Android and Safari on iPhone. Windows 11 x64 is the initial desktop target; physical phone testing is still pending.
 
 ```powershell
 dotnet build LanDrop.slnx -c Release
@@ -40,7 +41,7 @@ Or double-click **Start-LAN-Drop.cmd**. It builds the solution and opens the Win
 5. On the phone, choose files. Accept each request on the PC to start its upload to the chosen folder (default: Downloads/LAN-Drop). Reject it or cancel on the phone to skip sending. Requests expire after ten minutes.
 6. **Hide to notification area** keeps sharing running; double-click the tray icon to reopen. Closing the window stops sharing.
 
-Safari manages downloaded files; this app does not automatically save images into Photos or claim that a native browser download has been saved successfully. Keep the Safari tab open during uploads.
+The phone browser manages downloaded files. On Android, look in Chrome's Downloads; on iPhone, use Safari's downloads and Files. LAN Drop does not automatically save images into the gallery or claim that a browser download has been saved successfully. Keep the browser tab visible and the screen awake during preparation and uploads. If a QR scanner opens an embedded browser with a broken picker or download, open the link in Chrome on Android or Safari on iPhone. See the [Android guide](docs/ANDROID.md) ([česky](docs/cs/ANDROID.md)).
 
 If the phone cannot connect, check that devices can reach each other and that Windows allows the selected application/port on the private network. Guest Wi-Fi can isolate clients. The app does not create firewall rules, alter the network profile or open router ports.
 
@@ -72,7 +73,7 @@ English is the default. Choose **Čeština** or **Automatic** independently on t
 ./scripts/Publish-Portable.ps1
 ```
 
-The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-alpha.4-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
+The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-alpha.5-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
 
 ## Verification
 
@@ -84,22 +85,25 @@ node tests/localization.cjs
 node tests/progress.cjs
 node tests/offers.cjs
 node tests/integrity.cjs
+node tests/mobile.cjs
 dotnet run --project tests/NetworkPolicy -c Release
 dotnet run --project tests/DesktopIntegrity -c Release
 dotnet run --project src/LanDrop.Desktop -c Release --no-build -- --smoke-test
 python tests/desktop_lifecycle.py
 ```
 
-Tests cover two-device authorization, pairing, recipient isolation, receive approval/rejection/cancellation/replay, checksums and corrupt uploads, worker cancellation, receipt validation, transfers, cookies, ranges, filenames, interrupted uploads, storage safety, language resources, progress calculations, profile policy and real desktop upload/download. Tests use loopback and do not validate a real iPhone, Wi-Fi or firewall.
+Tests cover two-device authorization, pairing, recipient isolation, receive approval/rejection/cancellation/replay, checksums and corrupt uploads, worker cancellation, receipt validation, transfers, cookies, ranges, filenames, interrupted uploads, storage safety, language resources, progress calculations, profile policy and real desktop upload/download. Browser emulation is not a real Android/iPhone device test; loopback checks do not validate Wi-Fi, camera QR scanning or firewall behavior.
 
 Browser hash assets are already bundled for normal source/portable use; no internet request is made during hashing. To regenerate them, use Node 24 and `npm ci --ignore-scripts`, then `npm run build:hash`. See [integrity protocol](docs/INTEGRITY.md) and [third-party notices](THIRD-PARTY-NOTICES.md).
 
+For browser checks, run `npm ci --ignore-scripts`, `npx playwright install chromium`, then `node tests/mobile_browser.cjs` after building the server. These exercise Chromium with an Android viewport/user agent, real worker uploads, PC acceptance and native browser downloads against an isolated local server. They do not exercise Android's actual file picker or phone hardware.
+
 ## Known limitations
 
-- HTTP is not encrypted. Trusted HTTPS in Safari remains an architecture decision and a stable-release gate.
+- HTTP is not encrypted. Trusted HTTPS in supported phone browsers remains an architecture decision and a stable-release gate.
 - No resumable upload or persistent transfer history yet.
-- Checksums verify the saved PC copy at commit time. They do not encrypt or authenticate HTTP, guarantee survival of power loss, or verify a Safari download. Later changes to saved files are not automatically detected.
-- Hash preparation reads the source before upload, and the server reads the saved temporary copy again. Large-file performance and real iPhone behavior still need measurement.
+- Checksums verify the saved PC copy at commit time. They do not encrypt or authenticate HTTP, guarantee survival of power loss, or verify a phone browser download. Later changes to saved files are not automatically detected.
+- Hash preparation reads the source before upload, and the server reads the saved temporary copy again. Large-file performance and real Android/iPhone behavior still need measurement.
 - Incoming offers are per file, valid for ten minutes and bound to the device, name and declared size. They do not verify file contents. An attempted upload consumes approval even if it fails; retry with a new request.
 - The 10 GB per-file limit is a configured ceiling, not a benchmarked guarantee.
 - Byte quota is cumulative for the server run; deleting an outgoing share releases its bytes. Hiding incoming entries preserves their files and quota. Restart resets the quota; this is not total-disk accounting.

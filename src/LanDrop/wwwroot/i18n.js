@@ -5,7 +5,7 @@ const translations = {
     "headline": "Send it over Wi-Fi.",
     "intro": "Photos, videos and files between your phone and computer. No account or cloud.",
     "welcomeTitle": "Connect to your computer",
-    "welcomeHelp": "Start LAN Drop on Windows and scan the QR code with your iPhone.",
+    "welcomeHelp": "Start LAN Drop on Windows and scan the QR code with your Android phone or iPhone. Open the link in Chrome on Android or Safari on iPhone.",
     "nameTitle": "What is your phone called?",
     "deviceName": "Device name",
     "connect": "Connect to PC",
@@ -28,7 +28,7 @@ const translations = {
     "chooseHelp": "Photos, videos, documents — choose multiple files at once",
     "cancel": "Cancel transfer",
     "fromPc": "Files from your computer",
-    "footer": "Files transfer directly over your local network using HTTP. Use trusted Wi-Fi and keep Safari open during uploads.",
+    "footer": "Files transfer directly over your local network using HTTP. Use trusted Wi-Fi and keep your browser open during uploads.",
     "unauthorized": "Connection not approved or expired. Scan a new QR code.",
     "noAddress": "No network address found. Connect your computer to Wi-Fi.",
     "qrAlt": "QR code to connect your phone",
@@ -64,7 +64,7 @@ const translations = {
     "qrUntil": "QR valid until {time}",
     "operationFailed": "Operation failed ({status}).",
     "transferFailed": "Transfer failed ({status}).",
-    "defaultName": "My iPhone",
+    "defaultName": "My phone",
     "outgoingDone": "Files are ready to download on the selected phone."
   },
   "cs": {
@@ -73,7 +73,7 @@ const translations = {
     "headline": "Pošli to přes Wi-Fi.",
     "intro": "Fotky, videa a soubory mezi telefonem a počítačem. Bez účtu a bez cloudu.",
     "welcomeTitle": "Připoj se k počítači",
-    "welcomeHelp": "Na Windows spusť LAN Drop a iPhonem načti QR kód.",
+    "welcomeHelp": "Na Windows spusť LAN Drop a Androidem nebo iPhonem načti QR kód. Odkaz otevři v Chrome na Androidu nebo v Safari na iPhonu.",
     "nameTitle": "Jak se má telefon jmenovat?",
     "deviceName": "Název zařízení",
     "connect": "Připojit k PC",
@@ -96,7 +96,7 @@ const translations = {
     "chooseHelp": "Fotky, videa, dokumenty — můžeš vybrat více najednou",
     "cancel": "Zrušit přenos",
     "fromPc": "Soubory z počítače",
-    "footer": "Přenos probíhá přímo po místní síti přes HTTP. Používej důvěryhodnou Wi-Fi a nech Safari během přenosu otevřené.",
+    "footer": "Přenos probíhá přímo po místní síti přes HTTP. Používej důvěryhodnou Wi-Fi a nech prohlížeč během přenosu otevřený.",
     "unauthorized": "Připojení není povolené nebo vypršelo. Načti nový QR kód.",
     "noAddress": "Nenalezena síťová adresa. Připoj počítač k Wi-Fi.",
     "qrAlt": "QR kód pro připojení telefonu",
@@ -132,7 +132,7 @@ const translations = {
     "qrUntil": "QR platí do {time}",
     "operationFailed": "Operace se nepodařila ({status}).",
     "transferFailed": "Přenos se nepodařil ({status}).",
-    "defaultName": "Můj iPhone",
+    "defaultName": "Můj telefon",
     "outgoingDone": "Soubory jsou připravené ke stažení na vybraném telefonu."
   }
 };
@@ -229,9 +229,33 @@ Object.assign(translations.cs, {
   etaMinutes:'zbývá přibližně {value} min', etaHours:'zbývá přibližně {value} h',
   speedEta:'{speed}/s · {eta}', waitingForSave:'Čekám na dokončení zápisu na PC…'
 });
+Object.assign(translations.en, {
+  phonePlatform:'Your phone', platformAuto:'Automatic detection', platformOther:'Other device',
+  androidBrowserHelp:'Use Chrome on Android. If a QR scanner opens its own browser and file selection or downloads do not work, open the same link in Chrome.',
+  iosBrowserHelp:'Use Safari on iPhone or iPad. If file selection or downloads do not work inside another app, open the same link in Safari.',
+  otherBrowserHelp:'Open this link in a current browser. On Android use Chrome; on iPhone or iPad use Safari if file selection or downloads are unavailable.',
+  foregroundHelp:'Keep this browser tab visible and your screen awake during uploads. Switching apps or locking the phone may interrupt a transfer.',
+  androidDownloadHelp:'Tap Download. Find saved files in Chrome Downloads or your Files app. A browser preview may need its own download or save action.',
+  iosDownloadHelp:'Tap Download. Find saved files in Safari Downloads or the Files app. If a preview opens, use Share or Save to Files.',
+  otherDownloadHelp:'Tap Download and check your browser downloads. If a preview opens, use its save or download action.',
+  uploadUnsupported:'This browser cannot prepare and send files safely. Open this link in a current Chrome on Android or Safari on iPhone. Available download links can still be used.',
+  browserUnsupported:'This browser cannot connect to LAN Drop. Open this link in a current Chrome on Android or Safari on iPhone.'
+});
+Object.assign(translations.cs, {
+  phonePlatform:'Tvůj telefon', platformAuto:'Automatické rozpoznání', platformOther:'Jiné zařízení',
+  androidBrowserHelp:'Použij Chrome na Androidu. Pokud čtečka QR otevře vlastní prohlížeč a nefunguje výběr nebo stahování souborů, otevři stejný odkaz v Chrome.',
+  iosBrowserHelp:'Použij Safari na iPhonu nebo iPadu. Pokud v jiné aplikaci nefunguje výběr nebo stahování souborů, otevři stejný odkaz v Safari.',
+  otherBrowserHelp:'Otevři odkaz v aktuálním prohlížeči. Pokud nefunguje výběr nebo stahování souborů, na Androidu použij Chrome a na iPhonu nebo iPadu Safari.',
+  foregroundHelp:'Během odesílání nech tuto kartu prohlížeče viditelnou a obrazovku zapnutou. Přepnutí aplikace nebo zamknutí telefonu může přenos přerušit.',
+  androidDownloadHelp:'Klepni na Stáhnout. Uložené soubory najdeš ve stahování Chrome nebo v aplikaci Soubory. Náhled v prohlížeči může vyžadovat vlastní akci pro uložení.',
+  iosDownloadHelp:'Klepni na Stáhnout. Uložené soubory najdeš ve stahování Safari nebo v aplikaci Soubory. Pokud se otevře náhled, použij Sdílet nebo Uložit do Souborů.',
+  otherDownloadHelp:'Klepni na Stáhnout a zkontroluj stažené soubory prohlížeče. Pokud se otevře náhled, použij jeho akci pro uložení nebo stažení.',
+  uploadUnsupported:'Tento prohlížeč nedokáže bezpečně připravit a odeslat soubory. Otevři odkaz v aktuálním Chrome na Androidu nebo v Safari na iPhonu. Dostupné odkazy ke stažení můžeš dál použít.',
+  browserUnsupported:'Tento prohlížeč se nedokáže připojit k LAN Drop. Otevři odkaz v aktuálním Chrome na Androidu nebo v Safari na iPhonu.'
+});
 try { languagePreference = localStorage.getItem('landrop-language') || 'en'; } catch {}
 function locale() { return languagePreference === 'auto' ? (navigator.language.toLowerCase().startsWith('cs') ? 'cs' : 'en') : (translations[languagePreference] ? languagePreference : 'en'); }
 function t(key, values = {}) { let text = translations[locale()][key] ?? translations.en[key] ?? key; for(const [name,value] of Object.entries(values)) text = text.replaceAll('{'+name+'}', value); return text; }
-function applyLanguage() { document.documentElement.lang = locale(); document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent=t(el.dataset.i18n)); document.getElementById('language').value = languagePreference; const name = document.getElementById('device-name'); if(name.value === translations.en.defaultName || name.value === translations.cs.defaultName) name.value = t('defaultName'); }
+function applyLanguage() { document.documentElement.lang = locale(); document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent=t(el.dataset.i18n)); document.getElementById('language').value = languagePreference; }
 function setLanguage(value) { languagePreference = ['en','cs','auto'].includes(value) ? value : 'en'; try { localStorage.setItem('landrop-language', languagePreference); } catch {} applyLanguage(); }
 function errorMessage(body, status) { const key = body?.code; return key && translations.en[key] ? t(key) : body?.error || body?.message || t(status === 401 ? 'unauthorized' : 'operationFailed', {status}); }

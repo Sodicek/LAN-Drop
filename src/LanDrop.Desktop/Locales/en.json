@@ -1,6 +1,6 @@
 {
   "Subtitle": "Files between your PC and phone. Directly over your local network.",
-  "SecurityNote": "Development preview: HTTP is not encrypted. Use a trusted private network. Keep Safari open during transfers.",
+  "SecurityNote": "Development preview: HTTP is not encrypted. Use a trusted private network. Keep the phone browser open during transfers.",
   "NetworkLabel": "Choose a network interface before starting sharing.",
   "Connect": "Connect a phone",
   "Folder": "Receive folder",

@@ -6,7 +6,7 @@ Updated: 2026-10-11. This document separates product targets from implemented fe
 
 Start the Windows application, connect a phone through a QR code, approve it and transfer files over the local network. No mandatory account or cloud storage. Users must understand the recipient, destination folder and completion state.
 
-Initial target: Windows 11 x64 and iPhone Safari. Additional devices become supported only after real-device verification. Internet connectivity must not be required for basic local file transfer.
+Initial targets: Windows 11 x64, Android Chrome and iPhone Safari. Browser guidance and platform-neutral transfers are implemented; supported device/version claims require real-device verification. Internet connectivity must not be required for basic local file transfer.
 
 ## Advisory team
 
@@ -22,7 +22,7 @@ AI roles reviewed the proposal; this is not a staffed operations department or c
 | Network specialist | Interfaces, network profiles, firewall, VPN and guest isolation |
 | Operations/support | Lifecycle, troubleshooting, cleanup and redacted diagnostics |
 | C# architect | Modules, protocol, bounded streaming and state |
-| QA/iOS tester | Automated regressions and physical-device test matrix |
+| QA/mobile tester | Automated regressions and Android/iPhone physical-device test matrix |
 | Release manager | Versions, portable/installer distribution, signatures |
 | Localization | English/Czech parity, error codes and contribution workflow |
 
@@ -46,14 +46,14 @@ Every state includes text, not color alone. QR has a copyable-link alternative; 
 
 ## Architecture
 
-Target: .NET 10 + WPF desktop + ASP.NET Core transport + responsive Safari web client.
+Target: .NET 10 + WPF desktop + ASP.NET Core transport + responsive Android Chrome / iPhone Safari web client.
 
 ```mermaid
 flowchart LR
  Desktop[Windows WPF] --> Core[Devices, offers, queue]
  Core --> Storage[Settings and storage]
  Core --> Transport[Selected-interface server]
- Phone[iPhone Safari] <--> Transport
+ Phone[Android Chrome / iPhone Safari] <--> Transport
  Diagnostics[Redacted diagnostics] --> Core
 ```
 
@@ -75,7 +75,7 @@ Do not log QR secrets, sessions, file contents or full private paths. History re
 
 ### Secure transport decision
 
-The preview is HTTP on a trusted network. It is not end-to-end encrypted. Stable release requires an authenticated secure channel proven on physical iPhone hardware.
+The preview is HTTP on a trusted network. It is not end-to-end encrypted. Stable release requires an authenticated secure channel proven on physical Android and iPhone hardware.
 
 Safari-native HTTPS needs a trusted certificate, hostname/routing, secure per-installation key handling and certificate renewal. Do not distribute a shared private key. Installing a root profile expands phone trust and is not an invisible pairing step. Development certificates are not a distribution strategy.
 
@@ -118,9 +118,9 @@ See [ToDo.md](ToDo.md) for checked implementation progress. Original milestone n
 
 API tests: expiry/replay, two-device isolation, revoke midstream, illegal paths/names, duplicates, empty files, quotas, write failures, restart/migrations and resume/integrity.
 
-Physical devices: 20 photos, HEIC/JPEG, videos, Unicode/emoji, multiple phones, Safari download/save, background/lock behavior, network loss and sleep. Test Wi-Fi/Ethernet, VPN, guest isolation, public/private profile, managed firewall, address changes and occupied ports.
+Physical devices: Android/Chrome and iPhone/Safari, 20 photos, HEIC/JPEG, videos, Unicode/emoji, multiple phones, file pickers and native download/save, background/lock behavior, network loss and sleep. Test Wi-Fi/Ethernet, VPN, guest isolation, public/private profile, managed firewall, address changes and occupied ports.
 
-Measure memory/CPU/disk and throughput on a defined reference network. A configured 10 GB maximum is not a performance guarantee. Install/upgrade/uninstall without losing completed user files. Loopback CI cannot replace physical iPhone/network tests.
+Measure memory/CPU/disk and throughput on a defined reference network. A configured 10 GB maximum is not a performance guarantee. Install/upgrade/uninstall without losing completed user files. Loopback CI and browser emulation cannot replace physical Android/iPhone/network tests.
 
 Defer cloud accounts/relay, automatic folder/clipboard synchronization, system service, enterprise management and whole-disk sharing.
 
