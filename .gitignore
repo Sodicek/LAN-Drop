@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+.vs/
+publish/
+*.user
+*.log
+__pycache__/
+.env
+.env.*
+*.pfx
+*.p12
+*.key

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LAN Drop</title><link rel="stylesheet" href="/style.css"><script src="/i18n.js" defer></script><script src="/app.js" defer></script></head>
+<body>
+<header><a class="brand" href="/">LAN<span>DROP</span><small data-i18n="tagline">FILES. DIRECT.</small></a><span class="badge" data-i18n="network">● Local network</span><div class="language-control"><label for="language" data-i18n="language">Language</label><select id="language"><option value="en">English</option><option value="cs">Čeština</option><option value="auto" data-i18n="auto">Automatic (browser)</option></select></div></header>
+<main>
+<div class="intro"><span class="eyebrow">WINDOWS ↔ IPHONE</span><h1 data-i18n="headline">Send it over Wi-Fi.</h1><p data-i18n="intro">Photos, videos and files between your phone and computer. No account or cloud.</p></div>
+<div id="notice" role="status" aria-live="polite"></div>
+<section id="welcome" class="card" hidden><h2 data-i18n="welcomeTitle">Connect to your computer</h2><p data-i18n="welcomeHelp">Start LAN Drop on Windows and scan the QR code with your iPhone.</p></section>
+<section id="pair" class="card" hidden><h2 data-i18n="nameTitle">What is your phone called?</h2><form id="pair-form"><label for="device-name" data-i18n="deviceName">Device name</label><input id="device-name" maxlength="60" value="My iPhone" required><button data-i18n="connect">Connect to PC</button></form><p class="muted" data-i18n="confirmHelp">Approve this device on your computer next.</p></section>
+<div id="desktop" class="grid" hidden>
+<section class="card"><div class="section-head"><h2 data-i18n="pairTitle">01 / Connect a phone</h2><button id="renew" class="secondary" data-i18n="newQr">New QR</button></div><label for="address" data-i18n="address">Computer network address</label><select id="address"></select><p id="listen-note" class="muted" data-i18n="loopback" hidden>Local-only mode. Restart LAN Drop with your Wi-Fi address to connect a phone.</p><div id="qr"></div><a id="pair-link" class="link" target="_blank" rel="noreferrer" data-i18n="pairLink">Open pairing link</a><p id="expiry" class="muted"></p><p class="muted" data-i18n="networkHelp">Connect both devices to the same Wi-Fi. If the page does not open, check the private network and Windows firewall.</p></section>
+<section class="card"><h2 data-i18n="devicesTitle">02 / Connected devices</h2><div id="devices"></div><hr><h2 data-i18n="folderTitle">Where to save files from your phone</h2><form id="folder-form"><label for="folder" data-i18n="folder">Destination folder on PC</label><input id="folder" required><button class="secondary" data-i18n="useFolder">Use folder</button></form><p class="muted" data-i18n="folderHelp">Received files stay in this folder after the app closes.</p></section>
+</div>
+<section id="waiting" class="card" hidden><div class="pulse"></div><h2 data-i18n="waitingTitle">Waiting for approval on PC…</h2><p data-i18n="waitingHelp">Approve the connection in the device list on your computer.</p></section>
+<section id="transfer" class="card" hidden><div class="section-head"><h2 id="transfer-title" data-i18n="send">Send files</h2><span class="badge" data-i18n="limit">Up to 10 GB / file</span></div>
+<div id="recipient-control" hidden><label for="recipient" data-i18n="recipient">Send to</label><select id="recipient"></select></div>
+<label class="drop" id="drop" for="file-input"><span class="upload-icon">↑</span><strong data-i18n="choose">Choose files or drop them here</strong><span data-i18n="chooseHelp">Photos, videos, documents — choose multiple files at once</span><input id="file-input" type="file" multiple></label>
+<div id="progress-area" hidden><div class="section-head"><span id="progress-text"></span><button id="cancel" class="secondary" data-i18n="cancel">Cancel transfer</button></div><progress id="progress" max="100" value="0"></progress></div>
+<div id="history"></div></section>
+<section id="file-section" class="card" hidden><h2 id="files-title" data-i18n="fromPc">Files from your computer</h2><div id="files"></div></section>
+<footer data-i18n="footer">Files transfer directly over your local network using HTTP. Use trusted Wi-Fi and keep Safari open during uploads.</footer>
+</main></body></html>

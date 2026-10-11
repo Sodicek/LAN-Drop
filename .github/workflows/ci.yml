@@ -1,0 +1,44 @@
+name: Build and integration checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    permissions:
+      contents: read
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build application
+        shell: pwsh
+        run: |
+          if (Test-Path LanDrop.slnx) {
+            dotnet build LanDrop.slnx -c Release
+          } else {
+            dotnet build src/LanDrop -c Release
+          }
+      - name: Check browser script syntax
+        run: |
+          node --check src/LanDrop/wwwroot/app.js
+          node --check src/LanDrop/wwwroot/i18n.js
+      - name: Check localization coverage
+        run: node tests/localization.cjs
+      - name: Run HTTP integration checks
+        run: python tests/integration.py
+      - name: Smoke test desktop window
+        shell: pwsh
+        run: |
+          if (Test-Path src/LanDrop.Desktop/LanDrop.Desktop.csproj) {
+            dotnet run --project src/LanDrop.Desktop -c Release --no-build -- --smoke-test
+          }

@@ -1,0 +1,19 @@
+{
+ "Subtitle":"Files between your PC and phone. Directly over your local network.",
+ "SecurityNote":"Development preview: HTTP is not encrypted. Use a trusted private network. Keep Safari open during transfers.",
+ "NetworkLabel":"Choose a network interface before starting sharing.",
+ "Connect":"Connect a phone", "Folder":"Receive folder", "Devices":"Devices", "Send":"Send files", "Files":"Transfer overview", "Recipient":"Recipient",
+ "Start":"Start sharing", "Stop":"Stop sharing", "NewQr":"New QR", "CopyLink":"Copy pairing link",
+ "ChooseFolder":"Choose folder", "OpenFolder":"Open folder", "ChooseFiles":"Choose files", "Cancel":"Cancel transfer", "Hide":"Hide to notification area",
+ "Stopped":"Sharing is off.", "Running":"Sharing is on", "SelectNetwork":"Choose a network interface first.",
+ "ServerMissing":"Transfer server is missing. Build the solution or use the complete portable package.",
+ "ServerFailed":"Could not start the transfer server. Check the selected interface and try again.",
+ "OperationFailed":"Operation failed", "ConnectionLost":"Connection to the local server was lost.",
+ "NoDevices":"No devices yet. Scan the QR code with your phone.",
+ "Approve":"Approve", "Reject":"Reject", "Disconnect":"Disconnect", "Approved":"Approved", "Pending":"Awaiting approval",
+ "NoFiles":"No transfers yet.", "Unshare":"Stop sharing", "Dismiss":"Dismiss", "Ready":"Available to recipient", "Received":"Saved from phone",
+ "LocalOnly":"Local test mode. Choose a Wi-Fi or Ethernet address to connect a phone.",
+ "ScanQr":"Scan this QR code on your phone. Approve the request here. QR codes expire after 10 minutes.",
+ "SelectRecipient":"Connect and select a recipient first.", "InvalidFile":"Choose a file up to 10 GB.",
+ "ReadyForPhone":"Files are ready for the selected phone to download.", "Cancelled":"Transfer cancelled."
+}
