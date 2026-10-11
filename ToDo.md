@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-alpha.3**. An alpha number does not mean every release gate has passed.
+Current build: **0.2.0-alpha.4**. An alpha number does not mean every release gate has passed.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -34,7 +34,8 @@ Current build: **0.2.0-alpha.3**. An alpha number does not mean every release ga
 - [x] Upload speed and time remaining.
 - [ ] Persistent queue/history.
 - [ ] Repeat/retry and resumable chunked uploads.
-- [ ] Checksums and strict completion semantics.
+- [x] Upload checksums, stored-file readback and matching completion receipts.
+- [ ] Independently verified phone downloads and large-file performance measurements.
 - [x] Concurrent disk-space reservation and owned outbox cleanup.
 - [ ] Transfer restart recovery.
 

@@ -13,6 +13,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 - Per-file incoming offers: check the phone, name and size on the PC, then accept or reject before upload.
 - Individual recipients: each phone can list/download only files addressed to it.
 - Multiple files uploaded sequentially, progress, speed, time estimates and cancellation; empty files supported.
+- SHA-256 preparation, transfer checks and stored-file readback before confirming a saved PC copy.
 - Streaming to disk with duplicate-name protection, Windows filename checks and incomplete-upload cleanup.
 - Destination folder dialog, persistent folder/network/language preferences and notification-area access.
 - English and Czech on Windows and the web; automatic language option and English fallback.
@@ -71,7 +72,7 @@ English is the default. Choose **Čeština** or **Automatic** independently on t
 ./scripts/Publish-Portable.ps1
 ```
 
-The output is `publish/LAN-Drop-win-x64/`. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
+The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-alpha.4-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
 
 ## Verification
 
@@ -82,17 +83,23 @@ python tests/storage_safety.py
 node tests/localization.cjs
 node tests/progress.cjs
 node tests/offers.cjs
+node tests/integrity.cjs
 dotnet run --project tests/NetworkPolicy -c Release
+dotnet run --project tests/DesktopIntegrity -c Release
 dotnet run --project src/LanDrop.Desktop -c Release --no-build -- --smoke-test
 python tests/desktop_lifecycle.py
 ```
 
-Tests cover two-device authorization, pairing, recipient isolation, receive approval/rejection/cancellation/replay, transfers, cookies, ranges, filenames, interrupted uploads, storage safety, language resources, progress calculations, profile policy and the real desktop/server lifecycle. Tests use loopback and do not validate a real iPhone, Wi-Fi or firewall.
+Tests cover two-device authorization, pairing, recipient isolation, receive approval/rejection/cancellation/replay, checksums and corrupt uploads, worker cancellation, receipt validation, transfers, cookies, ranges, filenames, interrupted uploads, storage safety, language resources, progress calculations, profile policy and real desktop upload/download. Tests use loopback and do not validate a real iPhone, Wi-Fi or firewall.
+
+Browser hash assets are already bundled for normal source/portable use; no internet request is made during hashing. To regenerate them, use Node 24 and `npm ci --ignore-scripts`, then `npm run build:hash`. See [integrity protocol](docs/INTEGRITY.md) and [third-party notices](THIRD-PARTY-NOTICES.md).
 
 ## Known limitations
 
 - HTTP is not encrypted. Trusted HTTPS in Safari remains an architecture decision and a stable-release gate.
-- No resumable upload, checksum verification or persistent transfer history yet.
+- No resumable upload or persistent transfer history yet.
+- Checksums verify the saved PC copy at commit time. They do not encrypt or authenticate HTTP, guarantee survival of power loss, or verify a Safari download. Later changes to saved files are not automatically detected.
+- Hash preparation reads the source before upload, and the server reads the saved temporary copy again. Large-file performance and real iPhone behavior still need measurement.
 - Incoming offers are per file, valid for ten minutes and bound to the device, name and declared size. They do not verify file contents. An attempted upload consumes approval even if it fails; retry with a new request.
 - The 10 GB per-file limit is a configured ceiling, not a benchmarked guarantee.
 - Byte quota is cumulative for the server run; deleting an outgoing share releases its bytes. Hiding incoming entries preserves their files and quota. Restart resets the quota; this is not total-disk accounting.

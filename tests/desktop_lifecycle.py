@@ -24,6 +24,7 @@ with tempfile.TemporaryDirectory(prefix="landrop-desktop-") as directory:
     evidence = json.loads(proof.read_text(encoding="utf-8-sig"))
     assert evidence["Started"] is True and evidence["Stopped"] is True
     assert evidence["OffersApproved"] is True and evidence["OffersRejected"] is True
+    assert evidence["OutboundVerified"] is True
     assert evidence["ServerExitCode"] == 0
     assert not list((data / "Outbox").glob("*"))
-    print("PASS: native desktop starts backend, renders offers, approves/rejects through its UI handlers, stops gracefully and cleans owned outbox.")
+    print("PASS: native desktop starts backend, approves/rejects through UI handlers, verifies actual outbound uploads/receipts, stops gracefully and cleans owned outbox.")

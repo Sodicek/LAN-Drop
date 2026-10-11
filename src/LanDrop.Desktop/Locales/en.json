@@ -87,5 +87,13 @@
   "Error_file_limit": "The registered file limit is reached. Remove shared files or restart sharing.",
   "Error_storage_quota": "The storage quota is exceeded. Remove prepared files and try again.",
   "Error_incomplete_transfer": "The transfer was not completed. Retry the file.",
-  "Error_transfer_cancelled": "The transfer was cancelled."
+  "Error_transfer_cancelled": "The transfer was cancelled.",
+  "PreparingFile": "Preparing file…",
+  "IntegrityFailed": "The server did not confirm matching file contents. The transfer is not verified. Retry the file.",
+  "UploadingFile": "Preparing file for phone…",
+  "CheckingFile": "Checking file",
+  "ReceivedVerified": "Saved · integrity verified",
+  "Error_checksum_mismatch": "File contents did not match. Nothing was saved. Retry the file.",
+  "Error_checksum_required": "A valid file checksum is required. Update LAN Drop and try again.",
+  "ReadyVerified": "Prepared · integrity verified"
 }

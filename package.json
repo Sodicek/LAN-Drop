@@ -1,0 +1,6 @@
+{
+  "name": "lan-drop-browser-assets",
+  "private": true,
+  "scripts": { "build:hash": "node scripts/Build-Hash.mjs" },
+  "devDependencies": { "@noble/hashes": "2.4.0", "esbuild": "0.28.2" }
+}

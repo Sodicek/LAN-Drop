@@ -10,6 +10,8 @@ The desktop controls the child server through authenticated loopback requests. L
 
 No automatic opening of received files, router port mapping or telemetry. Server startup console output contains an administrator secret and must not be shared.
 
+Uploads require a sender SHA-256 checksum. The server compares the streamed bytes and rereads the closed temporary file before committing it. Clients require a matching completion receipt. This detects accidental corruption; it does not authenticate unencrypted HTTP or stop an attacker replacing both data and checksum. Verification is at commit time, not a guarantee about later edits, Safari downloads or persistence after power loss.
+
 Desktop sharing checks the selected Windows profile before starting and blocks public/unknown profiles. While sharing, a bounded background query runs every fifteen seconds; an unavailable address or public/unknown profile stops the server. Detection is periodic and can be delayed. The browser-only server does not apply this gate or monitoring. Diagnostics do not modify firewall rules or prove reachability.
 
 Storage checks reject reparse points in destination paths, reserve space for concurrent uploads and retain a free-space buffer. They do not provide atomic protection against path replacement by a hostile local process or prevent unrelated programs consuming disk space. Crash cleanup only removes marked inactive outboxes with an available exclusive lease; completed inbox files and unmarked folders are preserved. Incomplete inbox files may remain after a crash.

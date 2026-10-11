@@ -20,6 +20,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Rebuild bundled browser hash library
+        run: |
+          npm ci --ignore-scripts
+          npm run build:hash
+          git diff --exit-code -- src/LanDrop/wwwroot/vendor
       - name: Build application
         shell: pwsh
         run: |
@@ -34,12 +39,19 @@ jobs:
           node --check src/LanDrop/wwwroot/i18n.js
           node --check src/LanDrop/wwwroot/progress.js
           node --check src/LanDrop/wwwroot/offers.js
+          node --check src/LanDrop/wwwroot/integrity.js
+          node --check src/LanDrop/wwwroot/hash-worker.js
+          node --check src/LanDrop/wwwroot/vendor/sha256.js
       - name: Check localization coverage
         run: node tests/localization.cjs
       - name: Check progress calculations
         run: node tests/progress.cjs
       - name: Check phone approval workflow
         run: node tests/offers.cjs
+      - name: Check file integrity and saved-file receipts
+        run: node tests/integrity.cjs
+      - name: Check native saved-file receipts
+        run: dotnet run --project tests/DesktopIntegrity -c Release
       - name: Run HTTP integration checks
         run: python tests/integration.py
       - name: Check Windows storage safety

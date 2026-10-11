@@ -94,7 +94,7 @@ app.MapGet("/api/admin", (HttpContext c) =>
     lock (gate)
     {
         PruneOffers();
-        return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId }).ToArray(), offers = offers.Values.Where(o => o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray() });
+        return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId, f.Sha256, verified = true }).ToArray(), offers = offers.Values.Where(o => o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray() });
     }
 });
 app.MapPost("/api/admin/shutdown", (HttpContext c) => { if (!IsAdmin(c)) return Results.Unauthorized(); c.Response.OnCompleted(() => { app.Lifetime.StopApplication(); return Task.CompletedTask; }); return Results.Ok(); });
@@ -149,7 +149,7 @@ app.MapPost("/api/admin/folder", (HttpContext c, FolderRequest request) =>
     catch (UnsafeStorageException) { return Results.BadRequest(Error("unsafe_folder", "Choose a local folder without links or redirected directories.")); }
     catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return Results.BadRequest(Error("invalid_folder", "Cannot use this folder. Check its path and permissions.")); }
 });
-app.MapGet("/api/state", (HttpContext c) => { var device = GetDevice(c); if (device is null && !IsAdmin(c)) return Results.Unauthorized(); return Results.Ok(new { approved = IsAdmin(c) || device!.Approved, files = (Allowed(c) ? files.Values.Where(f => f.Direction == "outbound" && (IsAdmin(c) || f.RecipientId == device!.Id)) : []).Select(f => new { f.Id, f.Name, f.Size }) }); });
+app.MapGet("/api/state", (HttpContext c) => { var device = GetDevice(c); if (device is null && !IsAdmin(c)) return Results.Unauthorized(); return Results.Ok(new { approved = IsAdmin(c) || device!.Approved, files = (Allowed(c) ? files.Values.Where(f => f.Direction == "outbound" && (IsAdmin(c) || f.RecipientId == device!.Id)) : []).Select(f => new { f.Id, f.Name, f.Size, f.Sha256, verified = true }) }); });
 app.MapPost("/api/offers", (HttpContext c, OfferRequest request) =>
 {
     var device = GetDevice(c);
@@ -210,6 +210,9 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
     if (!ValidName(name)) return Results.BadRequest(Error("invalid_filename", "Unsupported file name."));
     if (c.Request.ContentLength is null or < 0) return Results.BadRequest(Error("length_required", "A valid content length is required."));
     if (c.Request.ContentLength > maxSize) return Results.Json(Error("file_too_large", "The file size limit is exceeded."), statusCode: 413);
+    var checksum = c.Request.Headers["X-LanDrop-SHA256"].ToString();
+    if (checksum.Length != 64 || !checksum.All(char.IsAsciiHexDigit)) return Results.BadRequest(Error("checksum_required", "A valid SHA-256 checksum is required before sending this file."));
+    var expectedHash = Convert.FromHexString(checksum);
     var local = IsAdmin(c); var owner = local ? sessions.Values.FirstOrDefault(d => d.Id == recipient && d.Approved && d.Expires > DateTimeOffset.UtcNow) : GetDevice(c);
     if (owner is null) return Results.BadRequest(Error("recipient_required", "Choose an approved recipient."));
     if (!local)
@@ -248,6 +251,7 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
             diskRemaining = length;
         }
         StorageSafety.ValidateFolder(directory);
+        using var incomingHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
         {
             var buffer = new byte[65536]; long written = 0, nextCheck = 16L * 1024 * 1024;
@@ -257,6 +261,7 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
                 if (read == 0) break;
                 if (read > length - written) return Results.BadRequest(Error("incomplete_transfer", "The transfer length does not match its declared size."));
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellation.Token);
+                incomingHash.AppendData(buffer, 0, read);
                 written += read;
                 lock (gate) { diskReservations[volume] -= read; diskRemaining -= read; }
                 if (written >= nextCheck)
@@ -275,10 +280,18 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
         cancellation.Token.ThrowIfCancellationRequested();
         if (!Allowed(c) || owner.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized();
         var size = new FileInfo(temp).Length; if (size != length) return Results.BadRequest(Error("incomplete_transfer", "The transfer was not completed."));
+        if (!CryptographicOperations.FixedTimeEquals(incomingHash.GetHashAndReset(), expectedHash)) return Results.Json(Error("checksum_mismatch", "The file checksum does not match. The file was not saved."), statusCode: 422);
+        // Read back the closed temporary file before making it available. This checks
+        // the stored bytes, but does not guarantee persistence after power loss.
+        StorageSafety.ValidateFolder(directory);
+        await using (var saved = new FileStream(temp, FileMode.Open, FileAccess.Read, FileShare.None, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            if (!CryptographicOperations.FixedTimeEquals(await SHA256.HashDataAsync(saved, cancellation.Token), expectedHash)) return Results.Json(Error("checksum_mismatch", "The saved file checksum does not match. The file was not saved."), statusCode: 422);
+        cancellation.Token.ThrowIfCancellationRequested();
+        if (!Allowed(c) || owner.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized();
         StorageSafety.ValidateFolder(directory);
         var final = Path.Combine(directory, name);
         try { File.Move(temp, final); } catch (IOException) when (File.Exists(final)) { final = Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(name)}-{id}{Path.GetExtension(name)}"); File.Move(temp, final); }
-        var file = new SharedFile(id, Path.GetFileName(final), final, size, local ? "outbound" : "inbound", owner.Id); files[id] = file; committed = true; return Results.Ok(new { file.Id, file.Name, file.Size });
+        var file = new SharedFile(id, Path.GetFileName(final), final, size, local ? "outbound" : "inbound", owner.Id, checksum.ToLowerInvariant()); files[id] = file; committed = true; return Results.Ok(new { file.Id, file.Name, file.Size, file.Sha256, verified = true });
     }
     catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return Results.Json(Error("transfer_cancelled", "The transfer was cancelled."), statusCode: 409); }
     finally { try { StorageSafety.ValidateFolder(directory); if (File.Exists(temp)) File.Delete(temp); } finally { lock (gate) { if (volume is not null && diskRemaining != 0) diskReservations[volume] = diskReservations.GetValueOrDefault(volume) - diskRemaining; } if (!committed) { lock (gate) { reservedBytes -= length; reservedFiles--; } } slots.Release(); } }
@@ -293,6 +306,6 @@ app.Run();
 record PairRequest(string Code, string? Name);
 record FolderRequest(string Path);
 record Device(string Id, string Name, bool Approved, DateTimeOffset Expires, CancellationTokenSource Cancellation);
-record SharedFile(string Id, string Name, string Path, long Size, string Direction, string RecipientId);
+record SharedFile(string Id, string Name, string Path, long Size, string Direction, string RecipientId, string Sha256);
 record OfferRequest([property: System.Text.Json.Serialization.JsonRequired] string Name, [property: System.Text.Json.Serialization.JsonRequired] long Size);
 record ReceiveOffer(string Id, string Name, long Size, string DeviceId, string DeviceName, string Status, DateTimeOffset Expires);

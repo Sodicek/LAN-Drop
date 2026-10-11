@@ -87,5 +87,13 @@
   "Error_file_limit": "Byl dosažen limit evidovaných souborů. Odeber sdílené soubory nebo restartuj sdílení.",
   "Error_storage_quota": "Úložiště je zaplněné. Odeber připravené soubory a zkus to znovu.",
   "Error_incomplete_transfer": "Přenos nebyl dokončen. Odešli soubor znovu.",
-  "Error_transfer_cancelled": "Přenos byl zrušen."
+  "Error_transfer_cancelled": "Přenos byl zrušen.",
+  "PreparingFile": "Příprava souboru…",
+  "IntegrityFailed": "Server nepotvrdil shodný obsah souboru. Přenos není ověřený. Zkus soubor znovu.",
+  "UploadingFile": "Příprava souboru pro telefon…",
+  "CheckingFile": "Kontrola souboru",
+  "ReceivedVerified": "Uloženo · shoda obsahu ověřena",
+  "Error_checksum_mismatch": "Obsah souboru se neshoduje. Nic se neuložilo. Zkus soubor znovu.",
+  "Error_checksum_required": "Je vyžadován platný kontrolní součet souboru. Aktualizuj LAN Drop a zkus to znovu.",
+  "ReadyVerified": "Připraveno · shoda obsahu ověřena"
 }

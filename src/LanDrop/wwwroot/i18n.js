@@ -184,6 +184,20 @@ translations.en.file_limit = 'The registered file limit is reached. Remove share
 translations.cs.file_limit = 'Byl dosažen limit evidovaných souborů. Odeber sdílené soubory nebo restartuj sdílení.';
 let languagePreference = 'en';
 Object.assign(translations.en, {
+  checkingFile:'Checking file · {percent} %', pcCopyChecked:' · PC copy checked',
+  checksum_failed:'Could not check this file. Choose it again and retry.',
+  checksum_required:'The file checksum is missing or invalid. Reload LAN Drop and retry.',
+  checksum_mismatch:'The transferred file did not match its checksum. It was not saved. Retry with a new request.',
+  receipt_invalid:'The PC did not confirm a matching saved file. Check the transfer list before retrying.'
+});
+Object.assign(translations.cs, {
+  checkingFile:'Kontroluji soubor · {percent} %', pcCopyChecked:' · Kopie na PC ověřena',
+  checksum_failed:'Soubor se nepodařilo zkontrolovat. Vyber ho znovu a opakuj přenos.',
+  checksum_required:'Kontrolní součet souboru chybí nebo není platný. Obnov LAN Drop a opakuj přenos.',
+  checksum_mismatch:'Přenesený soubor neodpovídá kontrolnímu součtu. Nebyl uložen. Odešli novou žádost.',
+  receipt_invalid:'Počítač nepotvrdil uložení odpovídajícího souboru. Před opakováním zkontroluj přehled přenosů.'
+});
+Object.assign(translations.en, {
   offersTitle:'Incoming file requests', offersHelp:'Check the phone, file name and size before accepting.',
   noOffers:'No incoming file requests.', acceptFile:'Accept file',
   waitingForFileApproval:'Waiting for the PC to accept this file…',

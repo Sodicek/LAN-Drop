@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0-alpha.4 — 2026-10-11
+
+### Added
+- SHA-256 integrity checks from the sender through streaming upload and stored-file readback before commit.
+- Browser preparation in a cancelable worker with one-megabyte file slices; native asynchronous preparation keeps the source open through upload.
+- Strict upload receipts: success requires matching size, checksum and verified status.
+- English/Czech preparation and checked-PC-copy labels.
+- Known-vector, worker cancellation, malformed receipt, corruption, cleanup and real desktop upload/download tests.
+
+### Changed
+- Every upload requires `X-LanDrop-SHA256`; old/custom clients must update.
+- Pinned browser hash dependency, local bundled assets and reproducible bundle verification in CI.
+- Portable packages use versioned folders to avoid overwriting a running older preview.
+
+### Known gaps
+- Checksums detect accidental corruption; HTTP still allows an attacker to replace data and checksums.
+- Verification applies to the saved PC copy at commit time, not Safari's downloaded copy or future edits.
+- Preparing and reading back files adds disk/CPU work; large-file and physical iPhone benchmarks are pending.
+
 ## 0.2.0-alpha.3 — 2026-10-11
 
 ### Added

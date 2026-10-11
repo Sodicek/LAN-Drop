@@ -11,6 +11,7 @@ using System.Net.Http.Json;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -185,6 +186,26 @@ public partial class MainWindow : Window
             await Poll();
             var device = lastState!.Devices.Single(d => d.Name == "Desktop lifecycle phone");
             await Api($"/api/admin/devices/{device.Id}/approve",HttpMethod.Post);
+            await Poll();
+            Recipient.SelectedValue = device.Id;
+            var source = Path.Combine(dataDirectory,"lifecycle-outbound.txt");
+            await File.WriteAllTextAsync(source,"Desktop integrity lifecycle proof.\n");
+            var sourceBytes = await File.ReadAllBytesAsync(source);
+            var sourceHash = Convert.ToHexString(SHA256.HashData(sourceBytes)).ToLowerInvariant();
+            await SendFiles([source]); // Same prehash, upload, and receipt path as file picker/drop.
+            await Poll();
+            var prepared = lastState!.Files.Single(f => f.Name == Path.GetFileName(source));
+            if(!prepared.Verified || prepared.Sha256 != sourceHash || prepared.Size != sourceBytes.Length || Status.Text != T("ReadyForPhone"))
+                throw new IOException("Desktop upload integrity was not confirmed.");
+            using(var download = new HttpRequestMessage(HttpMethod.Get,baseUrl + "/api/files/" + prepared.Id))
+            {
+                download.Headers.Add("X-LanDrop-Session",session);
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var response = await http.SendAsync(download,deadline.Token);
+                response.EnsureSuccessStatusCode();
+                if(!(await response.Content.ReadAsByteArrayAsync(deadline.Token)).SequenceEqual(sourceBytes))
+                    throw new IOException("Desktop prepared file did not download intact.");
+            }
             foreach(var action in new[] { "approve", "reject" })
             {
                 var name = "lifecycle-" + action + ".txt";
@@ -208,7 +229,7 @@ public partial class MainWindow : Window
             if(lastState?.Inbox != folder) throw new IOException("Folder roundtrip failed.");
             await StopServer();
             if(server is not null || lastStopExitCode != 0) throw new IOException("Server did not stop gracefully.");
-            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, ServerExitCode = lastStopExitCode }));
+            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, OutboundVerified = true, ServerExitCode = lastStopExitCode }));
             result = 0;
         }
         catch(Exception) { await StopServer(); }
@@ -327,7 +348,9 @@ public partial class MainWindow : Window
         {
             var row = new DockPanel(); var remove = new Button { Content = T(f.Direction == "outbound" ? "Unshare" : "Dismiss") }; DockPanel.SetDock(remove,Dock.Right);
             remove.Click += async (_,_) => { try { await Api("/api/admin/files/"+f.Id,HttpMethod.Delete); await Poll(); } catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; } };
-            row.Children.Add(remove); row.Children.Add(new TextBlock { Text = $"{f.Name} · {f.Size:N0} B · {T(f.Direction == "outbound" ? "Ready" : "Received")}",VerticalAlignment = VerticalAlignment.Center }); FilesPanel.Children.Add(row);
+            var verified = f.Verified && UploadReceipt.IsSha256(f.Sha256);
+            var label = f.Direction == "outbound" ? (verified ? "ReadyVerified" : "Ready") : (verified ? "ReceivedVerified" : "Received");
+            row.Children.Add(remove); row.Children.Add(new TextBlock { Text = $"{f.Name} · {f.Size:N0} B · {T(label)}",VerticalAlignment = VerticalAlignment.Center }); FilesPanel.Children.Add(row);
         }
     }
     private async Task DecideOffer(string id,string action)
@@ -371,19 +394,39 @@ public partial class MainWindow : Window
                 using var request = new HttpRequestMessage(HttpMethod.Put,baseUrl+"/api/files?name="+Uri.EscapeDataString(info.Name)+"&recipient="+Uri.EscapeDataString(recipient));
                 request.Headers.Add("X-LanDrop-Admin",adminKey);
                 await using var file = File.OpenRead(path);
+                var length = file.Length;
+                if(length > 10L*1024*1024*1024) throw new IOException(T("InvalidFile"));
+                Status.Text = T("PreparingFile"); UploadProgress.Value = 0;
+                ProgressText.Text = info.Name + " · " + T("CheckingFile");
+                byte[] digest;
+                using(var checking = new ProgressReadStream(file, read => Dispatcher.InvokeAsync(() => {
+                    UploadProgress.Value = length == 0 ? 100 : read*100d/length;
+                    ProgressText.Text = info.Name + " · " + T("CheckingFile") + " · " + Math.Round(UploadProgress.Value) + " %";
+                }))) digest = await SHA256.HashDataAsync(checking, transfer.Token);
+                var expectedSha256 = Convert.ToHexString(digest).ToLowerInvariant();
+                file.Position = 0;
+                request.Headers.Add("X-LanDrop-SHA256",expectedSha256);
+                UploadProgress.Value = 0; Status.Text = T("UploadingFile");
                 var clock = Stopwatch.StartNew();
                 using var progress = new ProgressReadStream(file, read => {
                     var seconds = Math.Max(clock.Elapsed.TotalSeconds, 0.001);
                     var speed = read / seconds;
-                    var remaining = speed > 0 ? TimeSpan.FromSeconds(Math.Max(0, info.Length-read) / speed) : TimeSpan.Zero;
+                    var remaining = speed > 0 ? TimeSpan.FromSeconds(Math.Max(0, length-read) / speed) : TimeSpan.Zero;
                     Dispatcher.InvokeAsync(() => {
-                        UploadProgress.Value = info.Length == 0 ? 100 : read*100d/info.Length;
+                        UploadProgress.Value = length == 0 ? 100 : read*100d/length;
                         ProgressText.Text = info.Name + " · " + Math.Round(UploadProgress.Value) + " % · " + (speed/1048576).ToString("N1") + " MB/s · " + T("Eta") + " " + remaining.ToString(@"hh\:mm\:ss");
                     });
                 });
-                request.Content = new StreamContent(progress); request.Content.Headers.ContentLength = info.Length;
+                request.Content = new StreamContent(progress); request.Content.Headers.ContentLength = length;
                 using var response = await http.SendAsync(request,transfer.Token);
                 if(!response.IsSuccessStatusCode) throw new IOException(ResponseError(await response.Content.ReadAsStringAsync(transfer.Token),(int)response.StatusCode));
+                try
+                {
+                    using var receipt = JsonDocument.Parse(await response.Content.ReadAsStringAsync(transfer.Token));
+                    if(!UploadReceipt.Validate(receipt.RootElement,length,expectedSha256)) throw new IOException(T("IntegrityFailed"));
+                }
+                catch(JsonException ex) { throw new IOException(T("IntegrityFailed"),ex); }
+                UploadProgress.Value = 100; ProgressText.Text = info.Name + " · " + T("ReadyVerified");
             }
             Status.Text = T("ReadyForPhone"); await Poll();
         }
@@ -420,7 +463,7 @@ record LanguageChoice(string Code,string Name);
 
 record DesktopSettings(string Language = "en",string? Address = null);
 record DeviceInfo(string Id,string Name,bool Approved);
-record FileInfoDto(string Id,string Name,long Size,string Direction);
+record FileInfoDto(string Id,string Name,long Size,string Direction,string? Sha256 = null,bool Verified = false);
 record OfferInfo(string Id,string Name,long Size,string DeviceId,string DeviceName,string Status,DateTimeOffset Expires);
 record ServerState(string Inbox,DeviceInfo[] Devices,FileInfoDto[] Files,OfferInfo[]? Offers = null);
 

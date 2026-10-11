@@ -82,9 +82,9 @@ async function refresh(cachedState = null) {
 function renderFiles(files, local) {
   $('files').replaceChildren();
   if (!files.length) $('files').textContent = local ? t('noTransfers') : t('noFiles');
-  for (const f of files) { const el = row(f.name, size(f.size) + (local ? (f.direction === 'outbound' ? t('preparedSuffix') : t('receivedSuffix')) : '')); if (local) el.append(button(f.direction === 'outbound' ? t('unshare') : t('hide'),()=>api('/api/admin/files/'+f.id,{method:'DELETE'}))); else { const a = document.createElement('a'); a.href = '/download/'+f.id; a.textContent = t('download'); a.setAttribute('download',f.name); el.append(a); } $('files').append(el); }
+  for (const f of files) { const checked = f.verified === true && /^[a-f0-9]{64}$/.test(f.sha256); const el = row(f.name, size(f.size) + (local ? (f.direction === 'outbound' ? t('preparedSuffix') : t('receivedSuffix')) : '') + (checked ? t('pcCopyChecked') : '')); if (local) el.append(button(f.direction === 'outbound' ? t('unshare') : t('hide'),()=>api('/api/admin/files/'+f.id,{method:'DELETE'}))); else { const a = document.createElement('a'); a.href = '/download/'+f.id; a.textContent = t('download'); a.setAttribute('download',f.name); el.append(a); } $('files').append(el); }
 }
-function upload(file, index, count, recipientId, offerId) {
+function upload(file, index, count, recipientId, offerId, sha256) {
   return new Promise((resolve,reject) => {
     const meter = new TransferMeter(file.size);
     let lastRender = -Infinity;
@@ -105,9 +105,16 @@ function upload(file, index, count, recipientId, offerId) {
     xhr.open('PUT','/api/files?name='+encodeURIComponent(file.name)+(admin ? '&recipient='+encodeURIComponent(recipientId) : '&offer='+encodeURIComponent(offerId)));
     for(const [k,v] of Object.entries(headers())) xhr.setRequestHeader(k,v);
     xhr.setRequestHeader('Content-Type','application/octet-stream');
+    xhr.setRequestHeader('X-LanDrop-SHA256',sha256);
     xhr.upload.onprogress = e => { if(e.lengthComputable) renderProgress(e.loaded); };
     xhr.upload.onload = () => renderProgress(file.size, true);
-    xhr.onload = () => { if(xhr.status >= 200 && xhr.status < 300) resolve(); else { let body; try { body = JSON.parse(xhr.responseText); } catch {} reject(new Error(errorMessage(body, xhr.status))); } };
+    xhr.onload = () => {
+      let body; try { body = JSON.parse(xhr.responseText); } catch {}
+      if(xhr.status >= 200 && xhr.status < 300) {
+        if(validUploadReceipt(body, file.size, sha256)) resolve();
+        else reject(new Error(t('receipt_invalid')));
+      } else reject(new Error(errorMessage(body, xhr.status)));
+    };
     xhr.onerror = () => reject(new Error(t('networkError')));
     xhr.onabort = () => reject(new Error(t('cancelled')));
     renderProgress(0, true);
@@ -127,14 +134,20 @@ async function send(files) {
       $('progress').value = 0; $('progress-text').textContent = (i+1)+'/'+files.length+' · '+files[i].name;
       let offerId;
       try {
+        offerCancellation = new AbortController();
+        const sha256 = await hashFile(files[i], offerCancellation.signal, (loaded,total) => {
+          const percent = total === 0 ? 100 : Math.round(loaded*100/total);
+          $('progress').value = percent;
+          $('progress-text').textContent = (i+1)+'/'+files.length+' · '+files[i].name+' · '+t('checkingFile', {percent});
+        });
         if(!admin) {
-          offerCancellation = new AbortController();
           offerId = await new ReceiveOfferClient(api).approve(files[i], offerCancellation.signal, () => {
+            $('progress').value = 0;
             $('progress-text').textContent = (i+1)+'/'+files.length+' · '+files[i].name+' · '+t('waitingForFileApproval');
           });
         }
         if(cancelled) throw new Error(t('cancelled'));
-        await upload(files[i],i+1,files.length,recipientId,offerId);
+        await upload(files[i],i+1,files.length,recipientId,offerId,sha256);
       } finally {
         offerCancellation = null;
         if(offerId) await api('/api/offers/'+encodeURIComponent(offerId), {method:'DELETE'}).catch(()=>{});
@@ -143,7 +156,7 @@ async function send(files) {
     }
     if(!cancelled) notice(t(admin ? 'outgoingDone' : 'done'));
     await refresh();
-  } catch(e) { notice(e.name === 'AbortError' ? t('cancelled') : e.code ? t(e.code) : e.message,true); }
+  } catch(e) { notice(e.name === 'AbortError' ? t('cancelled') : e.code ? t(e.code) : translations.en[e.message] ? t(e.message) : e.message,true); }
   finally { current = null; busy = false; $('recipient').disabled = false; $('file-input').disabled = false; $('file-input').value = ''; $('progress-area').hidden = true; }
 }
 $('file-input').onchange = e => send([...e.target.files]);

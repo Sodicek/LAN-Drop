@@ -1,4 +1,5 @@
 """Windows storage integration checks; every server uses isolated temporary data."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -44,7 +45,10 @@ class Server:
         raise AssertionError("Storage test server did not start")
 
     def request(self, path, method="GET", body=None, headers=None, expected=200):
-        request = urllib.request.Request(self.base + path, data=body, method=method, headers=headers or self.admin)
+        headers = dict(headers or self.admin)
+        if method == "PUT":
+            headers.setdefault("X-LanDrop-SHA256", hashlib.sha256(body or b"").hexdigest())
+        request = urllib.request.Request(self.base + path, data=body, method=method, headers=headers)
         try:
             response = urllib.request.urlopen(request, timeout=10)
         except urllib.error.HTTPError as error:
@@ -155,11 +159,30 @@ with tempfile.TemporaryDirectory(prefix="landrop-storage-") as directory:
         assert replay["code"] == "offer_not_approved"
         assert not (inbox / "no-space.bin").exists()
         assert not list(inbox.glob("*.part"))
+        # A failed integrity check must release both the byte quota and record slot.
+        quota = Server(data, MaxStoredBytes=4, MaxRegisteredFiles=1); servers.append(quota)
+        quotaphone, quotarecipient = quota.phone()
+        failed_offer = quota.offer("bad-digest.txt", 4, quotaphone)
+        bad_path = f"/api/files?name=bad-digest.txt&offer={failed_offer}"
+        assert quota.request(bad_path, "PUT", b"evil", {**quotaphone, "X-LanDrop-SHA256": hashlib.sha256(b"good").hexdigest()}, 422)["code"] == "checksum_mismatch"
+        assert quota.request(bad_path, "PUT", b"good", quotaphone, 409)["code"] == "offer_not_approved"
+        assert quota.request("/api/admin")["files"] == []
+        assert not (inbox / "bad-digest.txt").exists()
+        bad_outbound = f"/api/files?name=bad-outbound.txt&recipient={quotarecipient}"
+        assert quota.request(bad_outbound, "PUT", b"evil", {**quota.admin, "X-LanDrop-SHA256": hashlib.sha256(b"good").hexdigest()}, 422)["code"] == "checksum_mismatch"
+        assert quota.request("/api/admin")["files"] == []
+        good = quota.request(f"/api/files?name=quota-restored.txt&recipient={quotarecipient}", "PUT", b"good")
+        assert good["sha256"] == hashlib.sha256(b"good").hexdigest() and good["verified"] is True
+        quota.request("/api/admin/files/" + good["id"], "DELETE")
+        good_inbound = quota.upload("quota-inbound.txt", b"good", quotaphone)
+        assert good_inbound["sha256"] == hashlib.sha256(b"good").hexdigest() and good_inbound["verified"] is True
+        assert (inbox / good_inbound["name"]).read_bytes() == b"good"
+        quota.stop()
         disk.stop(); cleaner.stop(); live.stop()
         assert (inbox / received["name"]).read_bytes() == b"received data"
         assert (sentinel / "keep.txt").exists()
         assert set((data / "Outbox").iterdir()) == {sentinel}
-        print("PASS: junction ancestors rejected, disk admission, stale cleanup, live/unmarked preservation, inbound preservation.")
+        print("PASS: junction ancestors rejected, disk admission, integrity failure quota/slot recovery, stale cleanup, live/unmarked preservation, inbound preservation.")
     finally:
         for server in servers:
             server.kill()

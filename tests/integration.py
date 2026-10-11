@@ -1,4 +1,5 @@
 """Real HTTP integration checks. Temporary inbox; server stopped after checks."""
+import hashlib
 import http.client
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -31,7 +32,12 @@ process = subprocess.Popen(
 threading.Thread(target=lambda: [lines.put(line) for line in process.stdout], daemon=True).start()
 
 def request(path, method="GET", data=None, headers=None, expected=200):
-    req = urllib.request.Request(base + path, data=data, method=method, headers=headers or {})
+    headers = dict(headers or {})
+    if method == "PUT":
+        headers.setdefault("X-LanDrop-SHA256", hashlib.sha256(data or b"").hexdigest())
+        if headers["X-LanDrop-SHA256"] is None:
+            del headers["X-LanDrop-SHA256"]
+    req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
     try:
         response = urllib.request.urlopen(req, timeout=10)
     except urllib.error.HTTPError as error:
@@ -60,7 +66,14 @@ def upload(name, payload, session, expected=200):
     assert obj(f"/api/offers/{identifier}", headers=session)["status"] == "consumed"
     replay = json.loads(request(path, "PUT", payload, session, 409)[0])
     assert replay["code"] == "offer_not_approved", "Each approval authorizes exactly one attempt"
+    if expected == 200:
+        assert_verified(json.loads(result[0]), payload)
     return result
+
+def assert_verified(value, payload):
+    assert value["size"] == len(payload), value
+    assert value["sha256"] == hashlib.sha256(payload).hexdigest(), value
+    assert value["verified"] is True, value
 
 try:
     deadline = time.monotonic() + 20
@@ -162,6 +175,30 @@ try:
         assert obj("/api/offers", "POST", {"name": "over-offer-limit.txt", "size": 0}, session, 429)["code"] == "offer_limit"
         for identifier in bounded_offers:
             request(f"/api/offers/{identifier}", "DELETE", headers=session)
+        # Invalid checksum metadata must not consume a valid approval or write any bytes.
+        digest_offer = offer("digest.bin", 4, session)
+        digest_path = f"/api/files?name=digest.bin&offer={digest_offer}"
+        for digest in [None, "", "0" * 63, "0" * 65, "z" * 64, "0" * 32 + " " + "0" * 31]:
+            failure = json.loads(request(digest_path, "PUT", b"good", {**session, "X-LanDrop-SHA256": digest}, 400)[0])
+            assert failure["code"] == "checksum_required"
+            assert obj(f"/api/offers/{digest_offer}", headers=session)["status"] == "approved"
+            assert not (Path(directory)/"digest.bin").exists()
+            assert not list(Path(directory).glob("*.part"))
+        # Same-length corruption is caught by content hashing, not just file size.
+        failure = json.loads(request(digest_path, "PUT", b"evil", {**session, "X-LanDrop-SHA256": hashlib.sha256(b"good").hexdigest()}, 422)[0])
+        assert failure["code"] == "checksum_mismatch"
+        assert obj(f"/api/offers/{digest_offer}", headers=session)["status"] == "consumed"
+        assert json.loads(request(digest_path, "PUT", b"good", session, 409)[0])["code"] == "offer_not_approved"
+        assert not (Path(directory)/"digest.bin").exists()
+        assert not list(Path(directory).glob("*.part"))
+        assert obj("/api/admin", headers=admin)["files"] == []
+        outbound_path = f"/api/files?name=corrupted-outbound.bin&recipient={device}"
+        for digest in [None, "broken"]:
+            assert json.loads(request(outbound_path, "PUT", b"evil", {**admin, "X-LanDrop-SHA256": digest}, 400)[0])["code"] == "checksum_required"
+        assert json.loads(request(outbound_path, "PUT", b"evil", {**admin, "X-LanDrop-SHA256": hashlib.sha256(b"good").hexdigest()}, 422)[0])["code"] == "checksum_mismatch"
+        assert obj("/api/admin", headers=admin)["files"] == []
+        assert not list((Path(storage.name)/"Outbox").glob("*/*.part"))
+        assert not list((Path(storage.name)/"Outbox").glob("*/corrupted-outbound.bin"))
         payload = os.urandom(2 * 1024 * 1024 + 117)
         # Simultaneous requests must not claim the same approval twice.
         race_offer = offer("fotka žluťoučká.bin", len(payload), session)
@@ -171,7 +208,7 @@ try:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
             try:
                 barrier.wait(timeout=5)
-                conn.request("PUT", race_path, payload, session)
+                conn.request("PUT", race_path, payload, {**session, "X-LanDrop-SHA256": hashlib.sha256(payload).hexdigest()})
                 response = conn.getresponse()
                 return response.status, response.read()
             finally:
@@ -181,6 +218,7 @@ try:
         assert sorted(status for status, _ in raced) == [200, 409], raced
         assert json.loads(next(body for status, body in raced if status == 409))["code"] == "offer_not_approved"
         received = json.loads(next(body for status, body in raced if status == 200))
+        assert_verified(received, payload)
         assert obj(f"/api/offers/{race_offer}", headers=session)["status"] == "consumed"
         assert (Path(directory)/received["name"]).read_bytes() == payload
         duplicate = json.loads(upload("fotka žluťoučká.bin",b"second",session)[0])
@@ -197,6 +235,7 @@ try:
         conn.putrequest("PUT",f"/api/files?name=interrupted.bin&offer={interrupted_offer}")
         conn.putheader("Content-Length","1000000")
         conn.putheader("X-LanDrop-Session",phone["token"])
+        conn.putheader("X-LanDrop-SHA256", hashlib.sha256(b"x" * 1000000).hexdigest())
         conn.endheaders()
         conn.send(b"incomplete")
         conn.close()
@@ -210,7 +249,14 @@ try:
         request("/api/files?name=bad-recipient.bin&recipient=unknown","PUT",payload,admin,400)
         outbound = json.loads(request(f"/api/files?name=video.bin&recipient={device}","PUT",payload,admin)[0])
         outbound2 = json.loads(request(f"/api/files?name=other.bin&recipient={device2}","PUT",b"private second phone",admin)[0])
+        assert_verified(outbound, payload)
+        assert_verified(outbound2, b"private second phone")
         listed = obj("/api/state",headers=session)["files"]
+        assert_verified(listed[0], payload)
+        assert_verified(obj("/api/state", headers=session2)["files"][0], b"private second phone")
+        all_metadata = {item["id"]: item for item in obj("/api/admin", headers=admin)["files"]}
+        for receipt, content in [(received, payload), (duplicate, b"second"), (empty, b""), (outbound, payload), (outbound2, b"private second phone")]:
+            assert_verified(all_metadata[receipt["id"]], content)
         assert [f["id"] for f in listed] == [outbound["id"]]
         assert [f["id"] for f in obj("/api/state",headers=session2)["files"]] == [outbound2["id"]]
         request("/api/files/"+outbound["id"],headers=session2,expected=404)
@@ -255,7 +301,7 @@ try:
         assert process.wait(timeout=10) == 0
         assert not list((Path(storage.name)/"Outbox").glob("*")), "Graceful shutdown must remove outbound copies"
         assert (Path(directory)/received["name"]).read_bytes() == payload
-    print("PASS: pairing, per-file approval, offer owner isolation, rejection/cancellation, mismatch, bounds, replay prevention, recipient isolation, file cap, ranges, revocation, graceful shutdown.")
+    print("PASS: SHA-256 receipts/metadata, missing/malformed digests, same-length corruption, cleanup, pairing, per-file approval, offer owner isolation, rejection/cancellation, mismatch, bounds, replay prevention, recipient isolation, file cap, ranges, revocation, graceful shutdown.")
 finally:
     process.terminate()
     try:
