@@ -27,7 +27,7 @@ The offline scenario interrupts the second request before its body reaches the s
 
 ## HTTPS verification
 
-Local `tests/secure_transport.py` verifies real TLS using a temporary authority trusted only in that client's SSL context, including rejection of untrusted roots and wrong hostnames. It leaves Windows roots unchanged. The disposable Windows GitHub Actions runner additionally runs the Android/Chromium profile over HTTPS: `tests/Run-TrustedBrowser.ps1` creates an isolated certificate, installs its public authority only in that runner's user trust store, gives the test request client the same authority and removes the root afterward. The script refuses non-CI execution. Certificate validation is never disabled. This proves desktop Chromium's HTTPS flow, not phone CA installation or physical Android/iOS trust behavior.
+Local `tests/secure_transport.py` verifies real TLS using a temporary authority trusted only in that client's SSL context, including rejection of untrusted roots and wrong hostnames. It leaves Windows roots unchanged. The disposable Windows GitHub Actions runner additionally runs the Android/Chromium profile over HTTPS: `tests/Run-TrustedBrowser.ps1` creates an isolated certificate, installs its public authority only in that runner's machine trust store, gives the test request client the same authority and removes the root afterward. The script refuses non-CI execution. Certificate validation is never disabled. This proves desktop Chromium's HTTPS flow, not phone CA installation or physical Android/iOS trust behavior.
 
 ## Run the checks
 
