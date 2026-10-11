@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory(prefix="landrop-desktop-") as directory:
         environment["DOTNET_MULTILEVEL_LOOKUP"] = "0"
     result = subprocess.run(
         command + ["--lifecycle-test", f"--TestDataDirectory={data}"],
-        cwd=ROOT, env=environment, timeout=45, capture_output=True, text=True, errors="replace")
+        cwd=ROOT, env=environment, timeout=75, capture_output=True, text=True, errors="replace")
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     # Hook must prove it ran; a normal window smoke test cannot count as lifecycle coverage.
     proof = data / "lifecycle-test.json"
@@ -41,6 +41,9 @@ with tempfile.TemporaryDirectory(prefix="landrop-desktop-") as directory:
     assert evidence["OutboundVerified"] is True
     assert evidence["BatchesApproved"] is True and evidence["BatchesRejected"] is True
     assert evidence["RetryWithoutDuplicates"] is True and evidence["TransfersRendered"] is True
+    assert evidence["SecureStarted"] is True and evidence["SecureQr"] is True
+    assert evidence["InvalidCertificateBlocked"] is True and evidence["SecretNotPersisted"] is True
+    assert evidence["SecureDefaultMigrated"] is True
     assert evidence["ServerExitCode"] == 0
     assert not list((data / "Outbox").glob("*"))
-    print("PASS: native desktop starts backend, approves/rejects batches, renders transfers, retries actual failed source without duplicating completed source, verifies saved receipts, stops gracefully and cleans owned outbox.")
+    print("PASS: native desktop starts HTTP preview and HTTPS server, creates HTTPS QR, blocks invalid certificates, omits persisted secrets and migrates safe defaults, approves/rejects batches, renders transfers, retries without duplicating completed sources, verifies receipts, stops gracefully and cleans owned outbox.")

@@ -6,6 +6,7 @@
 <main>
 <div class="intro"><span class="eyebrow">WINDOWS ↔ ANDROID / IPHONE</span><h1 data-i18n="headline">Send it over Wi-Fi.</h1><p data-i18n="intro">Photos, videos and files between your phone and computer. No account or cloud.</p></div>
 <div id="notice" role="status" aria-live="polite"></div>
+<p id="transport-notice" class="muted" role="status"></p>
 <section id="welcome" class="card" hidden><h2 data-i18n="welcomeTitle">Connect to your computer</h2><p data-i18n="welcomeHelp">Start LAN Drop on Windows and scan the QR code with your Android phone or iPhone.</p></section>
 <section id="mobile-help" class="card" hidden><label for="platform" data-i18n="phonePlatform">Your phone</label><select id="platform"><option value="auto" data-i18n="platformAuto">Automatic detection</option><option value="android">Android</option><option value="ios">iPhone / iPad</option><option value="other" data-i18n="platformOther">Other device</option></select><p id="browser-help" class="muted"></p><p class="muted" data-i18n="foregroundHelp">Keep this browser tab visible and your screen awake during uploads.</p><p id="capability-notice" class="muted" role="status" hidden></p></section>
 <section id="pair" class="card" hidden><h2 data-i18n="nameTitle">What is your phone called?</h2><form id="pair-form"><label for="device-name" data-i18n="deviceName">Device name</label><input id="device-name" maxlength="60" value="My phone" required><button data-i18n="connect">Connect to PC</button></form><p class="muted" data-i18n="confirmHelp">Approve this device on your computer next.</p></section>
@@ -24,5 +25,5 @@
 <section id="transfer-overview" class="card" hidden><h2 data-i18n="transferOverview">Transfer activity</h2><p class="muted" data-i18n="activityHelp">Activity for this sharing session. Browser downloads do not confirm saving on the phone.</p><div id="transfer-events"></div></section>
 <details class="card"><summary data-i18n="connectionHelpTitle">Connection help</summary><p data-i18n="connectionHelp">Keep both devices on the same reachable network. Guest Wi-Fi or a VPN can prevent connection. On Windows, check the selected private/domain adapter and firewall permissions for LAN Drop. After sleep or an address change, reconnect with a fresh QR; retry unfinished files only after checking the PC transfer list.</p></details>
 <section id="file-section" class="card" hidden><h2 id="files-title" data-i18n="fromPc">Files from your computer</h2><p id="download-help" class="muted" hidden></p><div id="files"></div></section>
-<footer data-i18n="footer">Files transfer directly over your local network using HTTP. Use trusted Wi-Fi and keep your browser open during uploads.</footer>
+<footer data-i18n="footer">Files transfer directly over your local network. Keep your browser open during uploads and check the connection status above.</footer>
 </main></body></html>

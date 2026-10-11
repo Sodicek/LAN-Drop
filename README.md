@@ -4,11 +4,12 @@
 
 LAN Drop is an early development preview built with C# / .NET 10. The Windows app generates a QR code; Android connects in Chrome and iPhone connects in Safari, without an account or an installed phone app. Files stay on your devices. Physical-device compatibility checks are still pending.
 
-**This preview uses unencrypted HTTP. Use a trusted private network only. It is not a stable or security-hardened release.** Publishing the source does not mean the public-release requirements in the product design are complete.
+**The Windows app now defaults to HTTPS; the phone must explicitly trust your certificate authority.** See [HTTPS setup](docs/HTTPS.md) ([česky](docs/cs/HTTPS.md)). An explicit unencrypted HTTP preview remains available. Physical-device and clean-machine verification are pending, so this is still a release candidate.
 
 ## Current features
 
 - Native Windows WPF window, network interface selection and explicit start/stop sharing.
+- HTTPS phone connections, local certificate generation or PFX selection, and session-only certificate passwords. Administration stays on authenticated loopback HTTP.
 - Locally generated QR code, approval on the PC, short-lived pairing and revocable sessions.
 - Incoming batch offers: check the phone, all names and total size on the PC, then accept or reject the selection before upload.
 - Individual recipients: each phone can list/download only files addressed to it.
@@ -36,7 +37,7 @@ dotnet run --project src/LanDrop.Desktop -c Release --no-build
 Or double-click **Start-LAN-Drop.cmd**. It builds the solution and opens the Windows application.
 
 1. Choose the Wi-Fi or Ethernet interface connected to the phone's network. Desktop sharing requires a private or domain profile; public/unknown profiles are blocked.
-2. Click **Start sharing**, scan the QR on the phone and enter a device name.
+2. Keep **Secure HTTPS** enabled, create/select a certificate and establish its public authority's trust on the phone following the setup guide. Click **Start sharing**, scan the HTTPS QR and enter a device name. Certificate validation errors stop setup; do not bypass them.
 3. Approve that request on the PC. Generate a new QR to connect another phone.
 4. Choose a recipient before adding files on the PC. On the phone, use **Download**.
 5. On the phone, choose files. Review the batch on the PC and accept once to upload them sequentially to the chosen folder (default: Downloads/LAN-Drop). Pending requests expire after ten minutes; batch acceptance is valid for two hours, bounded by the device session. Reject the batch or cancel on the phone to stop the selection.
@@ -74,7 +75,7 @@ English is the default. Choose **Čeština** or **Automatic** independently on t
 ./scripts/Publish-Portable.ps1
 ```
 
-The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.1-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
+The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.2-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
 
 Run `./scripts/Package-Release.ps1` after publishing to create a ZIP and its SHA-256 checksum. Candidate release notes and the [release test matrix](docs/RELEASE-TEST-MATRIX.md) explain which checks are automated and which still require real phones and clean Windows.
 
@@ -85,6 +86,8 @@ dotnet build LanDrop.slnx -c Release
 python tests/integration.py
 python tests/batches.py
 python tests/storage_safety.py
+dotnet run --project tests/Transport -c Release
+python tests/secure_transport.py
 node tests/localization.cjs
 node tests/progress.cjs
 node tests/offers.cjs
@@ -106,7 +109,7 @@ For mobile browser checks, run `npm ci --ignore-scripts`, `npx playwright instal
 
 ## Known limitations
 
-- HTTP is not encrypted. Trusted HTTPS in supported phone browsers remains an architecture decision and a stable-release gate.
+- HTTPS is implemented with explicit certificate trust. Physical Android/iPhone authority installation, trusted-browser connections and renewal still need practical verification. HTTP preview traffic is unencrypted.
 - No resumable upload or persistent transfer history yet. The current queue lives in the browser tab or Windows app; closing/reloading loses retained selections. Activity holds up to 200 entries for the current server run.
 - Checksums verify the saved PC copy at commit time. They do not encrypt or authenticate HTTP, guarantee survival of power loss, or verify a phone browser download. Later changes to saved files are not automatically detected.
 - Hash preparation reads the source before upload, and the server reads the saved temporary copy again. Large-file performance and real Android/iPhone behavior still need measurement.

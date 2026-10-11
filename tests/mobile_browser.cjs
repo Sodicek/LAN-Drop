@@ -25,17 +25,29 @@ async function main(profileName) {
   const listener = net.createServer();
   await new Promise(resolve => listener.listen(0, '127.0.0.1', resolve));
   const port = listener.address().port;
-  await new Promise(resolve => listener.close(resolve));
   const base = `http://127.0.0.1:${port}`;
-  let output = '', browser;
-  const server = spawn('dotnet', [path.join(root, 'src/LanDrop/bin/Release/net10.0/LanDrop.dll'),
-    `--Port=${port}`, '--OpenBrowser=false', '--ListenAddress=127.0.0.1', `--DataDirectory=${temporary}`],
+  const tlsCertificate = process.env.LAN_DROP_TEST_TLS_PFX;
+  let httpsPort;
+  if(tlsCertificate) {
+    const tlsListener = net.createServer();
+    await new Promise(resolve => tlsListener.listen(0, '127.0.0.1', resolve));
+    httpsPort = tlsListener.address().port;
+    await new Promise(resolve => tlsListener.close(resolve));
+    assert.notEqual(httpsPort, port);
+  }
+  await new Promise(resolve => listener.close(resolve));
+  const browserBase = tlsCertificate ? `https://127.0.0.1:${httpsPort}` : base;
+  let output = '', browser, adminKey;
+  const serverArguments = [path.join(root, 'src/LanDrop/bin/Release/net10.0/LanDrop.dll'),
+    `--Port=${port}`, '--OpenBrowser=false', '--ListenAddress=127.0.0.1', `--DataDirectory=${temporary}`];
+  if(tlsCertificate) serverArguments.push(`--HttpsPort=${httpsPort}`, `--HttpsCertificatePath=${tlsCertificate}`);
+  const server = spawn('dotnet', serverArguments,
     {cwd:path.join(root, 'src/LanDrop'), windowsHide:true, stdio:['ignore','pipe','pipe']});
   server.stdout.on('data', chunk => output += chunk);
   server.stderr.on('data', chunk => output += chunk);
   let exited = false; server.on('exit', () => exited = true);
   try {
-    const adminKey = await until(() => {
+    adminKey = await until(() => {
       if(exited) throw new Error(output);
       return output.match(/#admin=([a-f0-9]+)/)?.[1];
     }, 'server startup');
@@ -50,6 +62,7 @@ async function main(profileName) {
     const inbox = path.join(temporary, 'Inbox');
     await api('/api/admin/folder', 'POST', {path:inbox});
     const qr = await api('/api/admin/qr?address=127.0.0.1');
+    assert.equal(new URL(qr.link).origin, browserBase);
     browser = await profile.engine.launch();
     const context = await browser.newContext({...devices[profile.device], locale:'en-US', acceptDownloads:true});
     const page = await context.newPage();
@@ -76,6 +89,9 @@ async function main(profileName) {
     assert.equal(await page.locator('#transfer').isVisible(), false, 'Unapproved phone cannot select files');
     await api(`/api/admin/devices/${device.id}/approve`, 'POST');
     await page.locator('#transfer').waitFor({state:'visible'});
+    assert.equal(await page.locator('#transport-notice').textContent(), tlsCertificate
+      ? 'HTTPS connection: file transfers to this computer are encrypted.'
+      : 'HTTP preview: network transfers are unencrypted. Use trusted private networks and non-sensitive test files.');
     assert.equal(await page.locator('#file-input').isEnabled(), true);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'Mobile page fits viewport');
     const portrait = devices[profile.device].viewport;
@@ -173,16 +189,14 @@ async function main(profileName) {
     assert.equal(prepared.status, 200, await prepared.text());
     const downloadLink = page.locator('#files a').filter({hasText:'Download'});
     await downloadLink.waitFor();
-    const downloadResponse = await context.request.get(new URL(await downloadLink.getAttribute('href'), base).href);
+    const downloadResponse = await context.request.get(new URL(await downloadLink.getAttribute('href'), browserBase).href);
     assert.equal(downloadResponse.status(), 200);
     const disposition = downloadResponse.headers()['content-disposition'];
     const encodedName = disposition.match(/filename\*=UTF-8''([^;]*)/i)?.[1];
     assert.equal(decodeURIComponent(encodedName), outgoingName, 'Server sends the full UTF-8 filename');
     const [download] = await Promise.all([page.waitForEvent('download'), downloadLink.click()]);
     const suggestedName = download.suggestedFilename();
-    if(profileName === 'iphone' && process.platform === 'win32' && suggestedName === 'PC _ fotografie _. 1.bin') {
-      console.warn('LIMITATION: Windows WebKit uses the ASCII Content-Disposition fallback instead of the supplied UTF-8 filename. Original-name preservation is not passed for this environment; physical iOS Safari remains unverified.');
-    } else assert.equal(suggestedName, outgoingName);
+    assert.equal(suggestedName, outgoingName, 'Download action preserves the original Unicode filename');
     assert.equal(await download.failure(), null);
     assert.deepEqual(await fs.readFile(await download.path()), outgoing);
     assert.deepEqual(errors, []);
@@ -200,7 +214,7 @@ async function main(profileName) {
       sessionStorage.setItem('landrop-session', token);
     }, session);
     const unsupportedPage = await unsupported.newPage();
-    await unsupportedPage.goto(base);
+    await unsupportedPage.goto(browserBase);
     await unsupportedPage.locator('#transfer').waitFor({state:'visible'});
     assert.equal(await unsupportedPage.locator('#file-input').isDisabled(), true);
     assert.equal(await unsupportedPage.locator('#drop').getAttribute('aria-disabled'), 'true');
@@ -220,9 +234,13 @@ async function main(profileName) {
     const deniedDownload = await page.evaluate(async () => (await fetch(document.querySelector('#files a').href)).status);
     assert.equal(deniedDownload, 401);
     await context.close();
-    console.log(`PASS: ${profileName} (${profile.engine.name()}, ${profile.device} emulation): EN/CS, portrait/landscape, session reload, approval gate, real hash worker, 20-file consent, saved SHA-256, cancel/clear/reject, offline second-file retry without duplicates, empty/12 MiB binary, exact download bytes/UTF-8 response header, capability gating and revocation. See any filename limitation above. Physical devices/Safari not tested.`);
+    console.log(`PASS: ${profileName} (${profile.engine.name()}, ${profile.device} emulation, ${tlsCertificate ? 'trusted HTTPS' : 'HTTP preview'}): EN/CS, portrait/landscape, session reload, approval gate, real hash worker, 20-file consent, saved SHA-256, cancel/clear/reject, offline second-file retry without duplicates, empty/12 MiB binary, exact download bytes/Unicode filename, capability gating and revocation. Physical devices/Safari not tested.`);
   } finally {
     await browser?.close();
+    if(!exited && adminKey) {
+      await fetch(base+'/api/admin/shutdown', {method:'POST', headers:{'X-LanDrop-Admin':adminKey}}).catch(()=>{});
+      await until(() => exited, 'graceful server shutdown').catch(()=>{});
+    }
     if(!exited) { server.kill(); await until(() => exited, 'server shutdown'); }
     const cleanupTarget = path.resolve(temporary);
     assert.equal(path.dirname(cleanupTarget), path.resolve(os.tmpdir()), 'Cleanup must stay within OS temporary directory');

@@ -75,7 +75,7 @@ Do not log QR secrets, sessions, file contents or full private paths. History re
 
 ### Secure transport decision
 
-The preview is HTTP on a trusted network. It is not end-to-end encrypted. Stable release requires an authenticated secure channel proven on physical Android and iPhone hardware.
+The current candidate defaults to HTTPS in the Windows app, with explicit per-installation certificate selection/generation and manual phone authority trust. A separate HTTP preview remains for trusted-network testing. Stable release still requires the authenticated secure channel and setup procedure to be proven on physical Android and iPhone hardware.
 
 Safari-native HTTPS needs a trusted certificate, hostname/routing, secure per-installation key handling and certificate renewal. Do not distribute a shared private key. Installing a root profile expands phone trust and is not an invisible pairing step. Development certificates are not a distribution strategy.
 

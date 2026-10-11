@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0-rc.2 — 2026-10-11
+
+### Added
+- HTTPS phone listener with TLS 1.2/1.3, authenticated loopback-only administration and no automatic HTTP fallback.
+- Desktop HTTPS default, PFX selection, thirty-day local certificate generation, public CA fingerprint copying and English/Czech trust setup help.
+- Encrypted server PFX export, validation of private key/validity/server usage/IP names, and session-only passwords passed outside process arguments.
+- HTTPS QR links, secure download cookies and clear browser/native connection status.
+- Strict real TLS tests for trust, hostname mismatch, invalid configuration, transfers, ranges and revocation; expanded Chromium/WebKit mobile simulation.
+
+### Fixed
+- The phone Download action now preserves Unicode file names in Windows WebKit by removing the conflicting ASCII disposition fallback for those names.
+- Windows Schannel key-loading compatibility and certificate authority-key identifiers found by strict TLS tests.
+- Partial certificate outputs are rolled back without overwriting existing files.
+
+### Verification boundaries
+- Phone authority installation, physical Android/iPhone HTTPS, clean Windows and network/background checks remain unperformed.
+- Generated identities expire after thirty days or need replacement when the selected IP changes; phone trust must be set up again. No automatic root installation or renewal.
+- HTTP preview is explicitly available and unencrypted. Distribution remains unsigned.
+
 ## 0.2.0-rc.1 — 2026-10-11
 
 Release candidate; physical-device, clean-machine and secure-transport gates remain open.

@@ -17,13 +17,17 @@ LAN Drop's phone client runs in a browser. The automated suite uses actual Chrom
 | Fresh retry consent and no duplicate of confirmed completed file | Passed | Passed |
 | Empty file and 12 MiB synthetic binary across worker chunks | Passed | Passed |
 | Cookie-authorized browser download, exact bytes and UTF-8 response filename | Passed | Passed |
-| Original Unicode name chosen by the browser for download | Passed | **Not passed: ASCII fallback used** |
+| Original Unicode name chosen by the phone Download action | Passed | Passed in rc.2; corrected from rc.1 |
 | Missing upload capabilities disable uploads while downloads remain available | Passed | Passed |
 | Device revocation invalidates header access and the existing download cookie | Passed | Passed |
 
-The Windows WebKit build suggested `PC _ fotografie _. 1.bin` for `PC – fotografie č. 1.bin`. The server supplied the original name in `Content-Disposition: filename*` and downloaded bytes matched exactly. The test reports this specific outcome as a limitation; it does not count original-name preservation as passed. Unexpected names still fail. Whether physical iOS Safari chooses the original name remains unverified. Do not infer that a Windows WebKit result proves an iPhone result.
+In rc.1 the Windows WebKit build suggested `PC _ fotografie _. 1.bin` for `PC – fotografie č. 1.bin`, preferring the ASCII header fallback. In rc.2 the server supplies only the UTF-8 disposition name for Unicode filenames and the existing phone Download action supplies the original name through its download attribute. Chromium and Windows WebKit now preserve that name, with exact downloaded bytes. The test requires the original name and no longer tolerates the ASCII fallback. Direct URL navigation without the phone Download action is not verified for Unicode names in Windows WebKit. Physical iOS Safari remains unverified.
 
 The offline scenario interrupts the second request before its body reaches the server. It checks browser recovery and retained file references. It does not simulate every possible midstream Wi-Fi failure, device lock or power loss. Synthetic binary data does not test video decoding, gallery integration or the configured 10 GB ceiling.
+
+## HTTPS verification
+
+Local `tests/secure_transport.py` verifies real TLS using a temporary authority trusted only in that client's SSL context, including rejection of untrusted roots and wrong hostnames. It leaves Windows roots unchanged. The disposable Windows GitHub Actions runner additionally runs the Android/Chromium profile over HTTPS: `tests/Run-TrustedBrowser.ps1` creates an isolated certificate, installs its public authority only in that runner's user trust store, gives the test request client the same authority and removes the root afterward. The script refuses non-CI execution. Certificate validation is never disabled. This proves desktop Chromium's HTTPS flow, not phone CA installation or physical Android/iOS trust behavior.
 
 ## Run the checks
 

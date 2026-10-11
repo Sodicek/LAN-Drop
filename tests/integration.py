@@ -238,7 +238,16 @@ try:
         conn.putheader("X-LanDrop-SHA256", hashlib.sha256(b"x" * 1000000).hexdigest())
         conn.endheaders()
         conn.send(b"incomplete")
-        conn.close()
+        # Wait until this request really creates a partial file before disconnecting.
+        # Otherwise an empty directory can be observed before the server starts,
+        # and a later creation races the cleanup assertion.
+        try:
+            deadline = time.monotonic() + 5
+            while not list(Path(directory).glob("*.part")) and time.monotonic() < deadline:
+                time.sleep(.05)
+            assert list(Path(directory).glob("*.part")), "Interrupted request never started storing bytes"
+        finally:
+            conn.close()
         deadline = time.monotonic() + 5
         while list(Path(directory).glob("*.part")) and time.monotonic() < deadline:
             time.sleep(.05)

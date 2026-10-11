@@ -282,6 +282,18 @@ Object.assign(translations.cs, {
   browserUnsupported:'Tento prohlížeč se nedokáže připojit k LAN Drop. Otevři odkaz v aktuálním Chrome na Androidu nebo v Safari na iPhonu.'
 });
 try { languagePreference = localStorage.getItem('landrop-language') || 'en'; } catch {}
+Object.assign(translations.en, {
+  phoneHttps:'HTTPS connection: file transfers to this computer are encrypted.',
+  adminHttps:'Phone connections use HTTPS. This administration page connects locally on your computer.',
+  httpPreview:'HTTP preview: network transfers are unencrypted. Use trusted private networks and non-sensitive test files.',
+  footer:'Files transfer directly over your local network. Keep your browser open during uploads and check the connection status above.'
+});
+Object.assign(translations.cs, {
+  phoneHttps:'Připojení HTTPS: přenosy souborů do tohoto počítače jsou šifrované.',
+  adminHttps:'Telefony se připojují přes HTTPS. Tato stránka správy komunikuje místně na tvém počítači.',
+  httpPreview:'Vývojový režim HTTP: síťové přenosy nejsou šifrované. Používej důvěryhodnou privátní síť a testovací soubory bez citlivých údajů.',
+  footer:'Soubory se přenášejí přímo v místní síti. Během odesílání nech prohlížeč otevřený a zkontroluj výše uvedený stav připojení.'
+});
 function locale() { return languagePreference === 'auto' ? (navigator.language.toLowerCase().startsWith('cs') ? 'cs' : 'en') : (translations[languagePreference] ? languagePreference : 'en'); }
 function t(key, values = {}) { let text = translations[locale()][key] ?? translations.en[key] ?? key; for(const [name,value] of Object.entries(values)) text = text.replaceAll('{'+name+'}', value); return text; }
 function applyLanguage() { document.documentElement.lang = locale(); document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent=t(el.dataset.i18n)); document.getElementById('language').value = languagePreference; }

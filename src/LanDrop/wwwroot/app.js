@@ -24,6 +24,12 @@ function applyMobileUX() {
   $('drop').setAttribute('aria-disabled', String(!uploadSupport.supported));
   $('drop').classList.toggle('disabled', !uploadSupport.supported);
   if(admin && !uploadSupport.supported) { $('capability-notice').hidden = false; $('transfer').prepend($('capability-notice')); }
+  renderTransport();
+}
+function renderTransport(state = lastState) {
+  const secure = admin && state ? state.secureTransport === true : location.protocol === 'https:';
+  $('transport-notice').textContent = t(secure ? (admin ? 'adminHttps' : 'phoneHttps') : 'httpPreview');
+  $('transport-notice').classList.toggle('error', !secure);
 }
 const headers = () => admin ? {'X-LanDrop-Admin': admin} : {'X-LanDrop-Session': token || ''};
 function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
@@ -59,6 +65,7 @@ async function refresh(cachedState = null) {
   if (admin) {
     const data = cachedState || await api('/api/admin');
     lastState = data;
+    renderTransport(data);
     $('desktop').hidden = false; $('transfer').hidden = false; $('file-section').hidden = false;
     $('transfer-title').textContent = t('prepare'); $('files-title').textContent = t('transfers');
     if (document.activeElement !== $('folder') && !$('folder').dataset.edited) $('folder').value = data.inbox;

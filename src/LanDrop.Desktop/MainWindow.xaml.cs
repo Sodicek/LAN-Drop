@@ -22,6 +22,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using QRCoder;
 using Forms = System.Windows.Forms;
+using LanDrop.Transport;
 
 namespace LanDrop.Desktop;
 public partial class MainWindow : Window
@@ -39,6 +40,8 @@ public partial class MainWindow : Window
     private string? baseUrl, adminKey, pairLink;
     private string inbox = "";
     private bool polling, closing, uploading, stopping;
+    private bool configuringCertificate, secureSharing;
+    private GeneratedCertificate? createdCertificate;
     private Task? stopTask;
     private int generation;
     private int? lastStopExitCode;
@@ -55,6 +58,8 @@ public partial class MainWindow : Window
         Recipient.SelectionChanged += (_,_) => { if(!renderingState && !uploading && Recipient.SelectedValue is string) retryTargetExplicitlySelected = true; };
         english = LoadLanguage("en"); translations = english;
         try { if (!App.SmokeTest && File.Exists(settingsPath)) settings = JsonSerializer.Deserialize<DesktopSettings>(File.ReadAllText(settingsPath)) ?? new(); } catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
+        CertificatePath.Text = settings.CertificatePath ?? "";
+        SecureHttps.IsChecked = settings.SecureHttps;
         LanguagePicker.ItemsSource = new[] { new LanguageChoice("en", "English"), new LanguageChoice("cs", "Čeština"), new LanguageChoice("auto", "Automatic / Automaticky") };
         LanguagePicker.DisplayMemberPath = "Name"; LanguagePicker.SelectedValuePath = "Code"; LanguagePicker.SelectedValue = settings.Language;
         RefreshNetworks();
@@ -101,6 +106,11 @@ public partial class MainWindow : Window
         SendGroup.Header = T("Send"); FilesGroup.Header = T("Files"); RecipientLabel.Text = T("Recipient");
         TransfersGroup.Header = T("Transfers"); TransfersHelp.Text = T("TransfersHelp");
         RetryButton.Content = T("Retry"); ClearRetryButton.Content = T("ClearRetry"); TransferFolderButton.Content = T("OpenFolder"); UpdateRetry();
+        SecureHttps.Content = T("SecureHttps"); CertificateLabel.Text = T("CertificateLabel"); CertificatePasswordLabel.Text = T("CertificatePasswordLabel");
+        ChooseCertificateButton.Content = T("ChooseCertificate"); GenerateCertificateButton.Content = T("GenerateCertificate");
+        CopyCertificateButton.Content = T("CopyCertificateDetails");
+        if(createdCertificate is not null) CertificateInfo.Text = string.Format(CultureInfo.CurrentCulture,T("CertificateGenerated"),createdCertificate.AuthorityPath,createdCertificate.AuthorityFingerprint);
+        CertificateHelpHeader.Header = T("CertificateHelpHeader"); CertificateHelp.Text = T("CertificateHelp"); UpdateTransportControls();
         foreach (var pair in new[] { (StartButton,"Start"),(StopButton,"Stop"),(NewQrButton,"NewQr"),(CopyLinkButton,"CopyLink"),(ChooseFolderButton,"ChooseFolder"),(OpenFolderButton,"OpenFolder"),(SendButton,"ChooseFiles"),(CancelButton,"Cancel"),(HideButton,"Hide"),(DiagnosticsButton,"Diagnostics") }) pair.Item1.Content = T(pair.Item2);
         VersionText.Text = "LAN Drop " + (Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "development");
         if(server is null) Status.Text = T("Stopped");
@@ -111,6 +121,61 @@ public partial class MainWindow : Window
         var selected = Network.SelectedValue as string ?? settings.Address;
         Network.ItemsSource = NetworkDiagnostics.Interfaces().Select(n => n with { Label = (n.Profile == NetworkProfile.Loopback ? T("AdapterLoopback") : n.Name) + " · " + n.Address + " · " + T(n.AdapterType) + " · " + T("Profile" + n.Profile) }).ToArray();
         Network.SelectedValue = selected;
+    }
+    private void UpdateTransportControls()
+    {
+        var editable = server is null && !stopping && !configuringCertificate && StartButton.IsEnabled;
+        SecureHttps.IsEnabled = editable;
+        CertificateControls.IsEnabled = editable && SecureHttps.IsChecked == true;
+        var encrypted = server is null ? SecureHttps.IsChecked == true : secureSharing;
+        TransportStatus.Text = T(server is null ? (encrypted ? "HttpsSelected" : "HttpSelected") : (encrypted ? "HttpsRunning" : "HttpRunning"));
+        SecurityNote.Text = T(encrypted ? "HttpsSecurityNote" : "SecurityNote");
+    }
+    private void TransportChanged(object sender,RoutedEventArgs e)
+    {
+        if(english is null) return;
+        settings = settings with { SecureHttps = SecureHttps.IsChecked == true };
+        try { if(!App.SmokeTest && !App.LifecycleTest) SaveSettings(); }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { Status.Text = T("OperationFailed"); }
+        UpdateTransportControls();
+    }
+    private void ChooseCertificate(object sender,RoutedEventArgs e)
+    {
+        if(server is not null || configuringCertificate) return;
+        var dialog = new OpenFileDialog { Title = T("ChooseCertificate"), Filter = "Certificate (*.pfx;*.p12)|*.pfx;*.p12", CheckFileExists = true };
+        if(dialog.ShowDialog(this) != true) return;
+        CertificatePath.Text = Path.GetFullPath(dialog.FileName); CertificateInfo.Text = ""; createdCertificate = null; CopyCertificateButton.IsEnabled = false;
+        settings = settings with { CertificatePath = CertificatePath.Text };
+        try { if(!App.SmokeTest && !App.LifecycleTest) SaveSettings(); }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { Status.Text = T("OperationFailed"); }
+    }
+    private async void GenerateCertificate(object sender,RoutedEventArgs e)
+    {
+        if(server is not null || configuringCertificate) return;
+        if(Network.SelectedValue is not string address) { Status.Text = T("SelectNetwork"); return; }
+        if(CertificatePassword.Password.Length < 12) { Status.Text = T("CertificatePasswordMinimum"); return; }
+        var dialog = new SaveFileDialog { Title = T("GenerateCertificate"), Filter = "Certificate (*.pfx)|*.pfx", DefaultExt = ".pfx", FileName = "LAN-Drop-" + address + ".pfx", OverwritePrompt = true };
+        if(dialog.ShowDialog(this) != true) return;
+        configuringCertificate = true; StartButton.IsEnabled = Network.IsEnabled = false; UpdateTransportControls();
+        try
+        {
+            var password = CertificatePassword.Password;
+            var created = await Task.Run(() => CertificateTools.Generate(dialog.FileName,address,password));
+            createdCertificate = created; CopyCertificateButton.IsEnabled = true;
+            CertificatePath.Text = created.CertificatePath;
+            CertificateInfo.Text = string.Format(CultureInfo.CurrentCulture,T("CertificateGenerated"),created.AuthorityPath,created.AuthorityFingerprint);
+            settings = settings with { CertificatePath = created.CertificatePath, SecureHttps = true };
+            SecureHttps.IsChecked = true;
+            if(!App.SmokeTest && !App.LifecycleTest) SaveSettings();
+            Status.Text = T("CertificateReady");
+        }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or InvalidOperationException)
+        { Status.Text = T("CertificateGenerateFailed"); }
+        finally { configuringCertificate = false; StartButton.IsEnabled = Network.IsEnabled = true; UpdateTransportControls(); }
+    }
+    private void CopyCertificateDetails(object sender,RoutedEventArgs e)
+    {
+        if(createdCertificate is not null) Clipboard.SetText(string.Format(CultureInfo.CurrentCulture,T("CertificateGenerated"),createdCertificate.AuthorityPath,createdCertificate.AuthorityFingerprint));
     }
     private void ShowDiagnostics(object sender, RoutedEventArgs e)
     {
@@ -135,28 +200,72 @@ public partial class MainWindow : Window
         throw new IOException(T("ServerMissing"));
     }
     private async void StartSharing(object sender, RoutedEventArgs e) => await StartServer();
+    private static (int Administration,int Phone) FindAvailablePorts(string address,bool encrypted)
+    {
+        for(var attempt = 0; attempt < 32; attempt++)
+        {
+            using var administration = new TcpListener(IPAddress.Loopback,0);
+            administration.Start();
+            var port = ((IPEndPoint)administration.LocalEndpoint).Port;
+            // Check both actual interfaces while the admin candidate is reserved.
+            // The child still owns the final bind and fails closed if another process wins the race.
+            try
+            {
+                if(encrypted)
+                {
+                    using var phone = new TcpListener(IPAddress.Parse(address),0); phone.Start();
+                    var phonePort = ((IPEndPoint)phone.LocalEndpoint).Port;
+                    if(phonePort == port) continue;
+                    return (port,phonePort);
+                }
+                else if(address != "127.0.0.1") { using var phone = new TcpListener(IPAddress.Parse(address),port); phone.Start(); }
+                return (port,port);
+            }
+            catch(SocketException) { }
+        }
+        throw new IOException("Could not find available local sharing ports.");
+    }
     private async Task StartServer()
     {
         if(server is not null || Network.SelectedValue is not string address) { Status.Text = T("SelectNetwork"); return; }
         RefreshNetworks();
         if(Network.SelectedItem is not NetworkChoice selected || !NetworkDiagnostics.CanShare(selected.Profile)) { Status.Text = T("NetworkBlocked"); return; }
-        StartButton.IsEnabled = false; Network.IsEnabled = false;
+        var encrypted = SecureHttps.IsChecked == true;
+        if(encrypted)
+        {
+            try
+            {
+                using var certificate = CertificateTools.LoadServerCertificate(CertificatePath.Text,CertificatePassword.Password,address);
+            }
+            catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or CryptographicException or ArgumentException or InvalidOperationException)
+            { Status.Text = T("CertificateInvalid"); return; }
+        }
+        StartButton.IsEnabled = false; Network.IsEnabled = false; UpdateTransportControls();
         try
         {
             var executable = FindServer();
-            using var socket = new TcpListener(IPAddress.Loopback, 0); socket.Start(); var port = ((IPEndPoint)socket.LocalEndpoint).Port; socket.Stop();
+            var ports = FindAvailablePorts(address,encrypted);
+            var port = ports.Administration;
             var launch = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             launch.WorkingDirectory = Directory.Exists(Path.Combine(Path.GetDirectoryName(executable)!, "wwwroot")) ? Path.GetDirectoryName(executable)! : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(executable)!, "..", "..", ".."));
             foreach(var argument in new[] { "--OpenBrowser=false", "--ListenAddress=" + address, "--Port=" + port, "--DataDirectory=" + dataDirectory, "--contentRoot=" + launch.WorkingDirectory }) launch.ArgumentList.Add(argument);
+            foreach(var variable in new[] { "LAN_DROP_CERTIFICATE_PASSWORD", "HttpsCertificatePath", "HttpsPort" }) launch.Environment.Remove(variable);
+            if(encrypted)
+            {
+                launch.ArgumentList.Add("--HttpsCertificatePath=" + CertificatePath.Text);
+                launch.ArgumentList.Add("--HttpsPort=" + ports.Phone);
+                launch.Environment["LAN_DROP_CERTIFICATE_PASSWORD"] = CertificatePassword.Password;
+            }
             var ready = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             server = new Process { StartInfo = launch, EnableRaisingEvents = true };
             server.OutputDataReceived += (_, args) => { var line = args.Data; if(line is null) return; var index = line.IndexOf("http://127.0.0.1:",StringComparison.Ordinal); if(index >= 0 && line.Contains("#admin=")) ready.TrySetResult(line[index..].Trim()); };
             server.ErrorDataReceived += (_, _) => { }; // Drain errors without logging secrets; show a generic startup error.
             server.Exited += (_, _) => ready.TrySetException(new IOException(T("ServerFailed")));
-            server.Start(); server.BeginOutputReadLine(); server.BeginErrorReadLine();
+            try { server.Start(); } finally { launch.Environment.Remove("LAN_DROP_CERTIFICATE_PASSWORD"); }
+            secureSharing = encrypted; UpdateTransportControls(); server.BeginOutputReadLine(); server.BeginErrorReadLine();
             var url = await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
             baseUrl = url[..url.IndexOf("/#admin=",StringComparison.Ordinal)]; adminKey = url.Split("#admin=")[1];
-            settings = settings with { Address = address }; SaveSettings();
+            settings = settings with { Address = address, SecureHttps = encrypted, CertificatePath = CertificatePath.Text }; SaveSettings();
             StopButton.IsEnabled = ChooseFolderButton.IsEnabled = OpenFolderButton.IsEnabled = NewQrButton.IsEnabled = true;
             Status.Text = T("Running") + " · " + address;
             tray.Visible = true; timer.Start(); networkTimer.Start(); await Poll(); await RefreshQr();
@@ -170,6 +279,7 @@ public partial class MainWindow : Window
         try
         {
             if(App.TestDataDirectory is null) throw new IOException("Explicit test directory required.");
+            SecureHttps.IsChecked = false;
             Network.SelectedValue = "127.0.0.1";
             await StartServer();
             if(server is null || lastState is null) throw new IOException("Server failed to start or poll.");
@@ -263,10 +373,39 @@ public partial class MainWindow : Window
             if(lastState?.Inbox != folder) throw new IOException("Folder roundtrip failed.");
             await StopServer();
             if(server is not null || lastStopExitCode != 0) throw new IOException("Server did not stop gracefully.");
-            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, BatchesApproved = true, BatchesRejected = true, RetryWithoutDuplicates = true, TransfersRendered = true, OutboundVerified = true, ServerExitCode = lastStopExitCode }));
+            const string testPassword = "Isolated lifecycle test password 42!";
+            var certificate = await Task.Run(() => CertificateTools.Generate(Path.Combine(dataDirectory,"lifecycle.pfx"),"127.0.0.1",testPassword));
+            var wrongAddress = await Task.Run(() => CertificateTools.Generate(Path.Combine(dataDirectory,"wrong-address.pfx"),"127.0.0.2",testPassword));
+            SecureHttps.IsChecked = true; CertificatePath.Text = certificate.CertificatePath; CertificatePassword.Password = "wrong password";
+            await StartServer();
+            if(server is not null || Status.Text != T("CertificateInvalid")) throw new IOException("Incorrect certificate password did not fail closed.");
+            CertificatePath.Text = wrongAddress.CertificatePath; CertificatePassword.Password = testPassword;
+            await StartServer();
+            if(server is not null || Status.Text != T("CertificateInvalid")) throw new IOException("Incorrect certificate address did not fail closed.");
+            CertificatePath.Text = certificate.CertificatePath;
+            await StartServer(); timer.Stop();
+            if(server is null || !secureSharing || baseUrl?.StartsWith("http://127.0.0.1:",StringComparison.Ordinal) != true || SecureHttps.IsEnabled || CertificateControls.IsEnabled)
+                throw new IOException("Desktop secure startup or control isolation failed.");
+            var secureQr = await Api("/api/admin/qr?address=127.0.0.1");
+            if(secureQr.GetProperty("link").GetString()?.StartsWith("https://127.0.0.1:",StringComparison.Ordinal) != true)
+                throw new IOException("Desktop secure pairing link was not HTTPS.");
+            if(File.ReadAllText(settingsPath).Contains(testPassword,StringComparison.Ordinal) || server.StartInfo.ArgumentList.Any(a => a.Contains(testPassword,StringComparison.Ordinal)) || server.StartInfo.Environment.ContainsKey("LAN_DROP_CERTIFICATE_PASSWORD"))
+                throw new IOException("Certificate secret persisted outside the child environment.");
+            if(JsonSerializer.Deserialize<DesktopSettings>("{\"Language\":\"en\"}")?.SecureHttps != true)
+                throw new IOException("Legacy desktop settings did not default to HTTPS.");
+            await StopServer();
+            if(server is not null || lastStopExitCode != 0) throw new IOException("Secure server did not stop gracefully.");
+            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, BatchesApproved = true, BatchesRejected = true, RetryWithoutDuplicates = true, TransfersRendered = true, OutboundVerified = true, SecureStarted = true, SecureQr = true, InvalidCertificateBlocked = true, SecretNotPersisted = true, SecureDefaultMigrated = true, ServerExitCode = lastStopExitCode }));
             result = 0;
         }
-        catch(Exception) { await StopServer(); }
+        catch(Exception ex)
+        {
+            // The lifecycle hook uses only isolated fixture settings and credentials.
+            // Keep diagnostics out of normal application runs and redact its fixture password.
+            if(App.TestDataDirectory is not null)
+                File.WriteAllText(Path.Combine(dataDirectory,"lifecycle-error.json"),JsonSerializer.Serialize(new { Error = ex.ToString().Replace("Isolated lifecycle test password 42!","[fixture password]",StringComparison.Ordinal), Status = Status.Text }));
+            await StopServer();
+        }
         finally { closing = true; tray.Dispose(); http.Dispose(); Application.Current.Shutdown(result); }
     }
     private string ResponseError(string text,int status)
@@ -555,6 +694,7 @@ public partial class MainWindow : Window
         TransferFolderButton.IsEnabled = false; UpdateRetry();
         StartButton.IsEnabled = Network.IsEnabled = true; StopButton.IsEnabled = ChooseFolderButton.IsEnabled = OpenFolderButton.IsEnabled = NewQrButton.IsEnabled = SendButton.IsEnabled = CopyLinkButton.IsEnabled = false;
         Status.Text = T("Stopped"); stopping = false;
+        secureSharing = false; UpdateTransportControls();
     }
     private async void ClosingWindow(object? sender,CancelEventArgs e)
     {
@@ -564,7 +704,7 @@ public partial class MainWindow : Window
 }
 record LanguageChoice(string Code,string Name);
 
-record DesktopSettings(string Language = "en",string? Address = null);
+record DesktopSettings(string Language = "en",string? Address = null,bool SecureHttps = true,string? CertificatePath = null);
 record DeviceInfo(string Id,string Name,bool Approved);
 record FileInfoDto(string Id,string Name,long Size,string Direction,string? Sha256 = null,bool Verified = false);
 record OfferInfo(string Id,string Name,long Size,string DeviceId,string DeviceName,string Status,DateTimeOffset Expires);

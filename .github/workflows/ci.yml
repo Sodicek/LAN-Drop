@@ -60,6 +60,10 @@ jobs:
         run: dotnet run --project tests/DesktopIntegrity -c Release
       - name: Check retained desktop selections
         run: dotnet run --project tests/DesktopQueue -c Release
+      - name: Check transport certificates without installing trust roots
+        run: dotnet run --project tests/Transport -c Release
+      - name: Check real validated HTTPS transfers
+        run: python tests/secure_transport.py
       - name: Run HTTP integration checks
         run: python tests/integration.py
       - name: Check grouped consent, retry, and transfer isolation
@@ -70,12 +74,19 @@ jobs:
         env:
           LAN_DROP_SCREENSHOT_DIR: ${{ runner.temp }}/landrop-mobile-screenshots
         run: node tests/mobile_browser.cjs
+      - name: Check trusted HTTPS in Chromium on the disposable CI runner
+        shell: pwsh
+        env:
+          LAN_DROP_SCREENSHOT_DIR: ${{ runner.temp }}/landrop-mobile-https-screenshots
+        run: ./tests/Run-TrustedBrowser.ps1
       - name: Save mobile browser screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mobile-browser-screenshots
-          path: ${{ runner.temp }}/landrop-mobile-screenshots
+          path: |
+            ${{ runner.temp }}/landrop-mobile-screenshots
+            ${{ runner.temp }}/landrop-mobile-https-screenshots
           if-no-files-found: ignore
       - name: Check Windows storage safety
         run: python tests/storage_safety.py

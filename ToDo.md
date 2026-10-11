@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-rc.1**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
+Current build: **0.2.0-rc.2**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -31,6 +31,8 @@ Current build: **0.2.0-rc.1**. A release candidate does not mean every release g
 - [ ] Desktop interaction tests on a clean Windows machine.
 - [x] Better server-start diagnosis and network profile information.
 - [x] Automated desktop/server start, folder selection and shutdown check.
+- [x] HTTPS default, local IP certificate creation/selection, session-only password and EN/CS trust setup help.
+- [x] Strict TLS integration checks and Chromium/WebKit emulation with exact Unicode download names.
 - [ ] Shared Core/Transport modules and typed client.
 - [ ] Theme selection and full accessibility verification.
 
@@ -46,7 +48,8 @@ Current build: **0.2.0-rc.1**. A release candidate does not mean every release g
 ## 0.4.0 — offers and secure transport
 - [x] Per-file receive offers with explicit approval, rejection and cancellation.
 - [x] Batch offers for selecting many photos with one approval.
-- [ ] Authenticated secure transport proven in Safari or revised native iOS scope.
+- [x] TLS backend with strict trusted-CA/hostname tests and HTTPS QR/cookie protection.
+- [ ] Authenticated secure transport and manual authority setup proven on physical Android and iPhone Safari.
 - [ ] Manual text/link sharing.
 - [ ] Safe image previews and optional ZIP download after device tests.
 

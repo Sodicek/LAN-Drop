@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../LanDrop/CertificateTools.cs" Link="CertificateTools.cs" />
     <PackageReference Include="QRCoder" Version="1.7.0" />
     <EmbeddedResource Include="Locales/*.json" />
   </ItemGroup>

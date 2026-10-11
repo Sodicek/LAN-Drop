@@ -6,15 +6,45 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Reflection;
 using QRCoder;
+using LanDrop.Transport;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 
 var builder = WebApplication.CreateBuilder(args);
 var port = builder.Configuration.GetValue("Port", 45821);
+if (port is < 1 or > 65535) throw new ArgumentException("Port must be between 1 and 65535.");
 string[] Addresses() => NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback).SelectMany(n => n.GetIPProperties().UnicastAddresses).Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork).Select(a => a.Address.ToString()).Distinct().ToArray();
 var listeningAddress = builder.Configuration["ListenAddress"] ?? "127.0.0.1";
 if (!IPAddress.TryParse(listeningAddress, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork || (listeningAddress != "127.0.0.1" && !Addresses().Contains(listeningAddress))) throw new ArgumentException("ListenAddress must be loopback or an active local IPv4 address.");
-builder.WebHost.UseUrls(listeningAddress == "127.0.0.1" ? [$"http://127.0.0.1:{port}"] : [$"http://127.0.0.1:{port}", $"http://{listeningAddress}:{port}"]);
+var certificatePath = builder.Configuration["HttpsCertificatePath"];
+var secureTransport = certificatePath is not null;
+var httpsPort = builder.Configuration.GetValue("HttpsPort", port + 1);
+using X509Certificate2? serverCertificate = secureTransport ? LoadCertificate() : null;
+var certificateFingerprint = serverCertificate is null ? null : CertificateTools.Fingerprint(serverCertificate);
+X509Certificate2 LoadCertificate()
+{
+    if (httpsPort is < 1 or > 65535 || httpsPort == port) throw new ArgumentException("HttpsPort must be between 1 and 65535 and different from the administration Port.");
+    try { return CertificateTools.LoadServerCertificate(certificatePath!, Environment.GetEnvironmentVariable("LAN_DROP_CERTIFICATE_PASSWORD") ?? "", listeningAddress); }
+    catch (Exception e) when (e is CryptographicException or IOException or UnauthorizedAccessException or ArgumentException)
+    {
+        // Never echo credential values, certificate contents, or provider exception details.
+        Console.Error.WriteLine("HTTPS could not start. Check the PFX file, LAN_DROP_CERTIFICATE_PASSWORD, certificate validity, server authentication usage, and selected IPv4 subject alternative name. HTTP fallback is disabled.");
+        Environment.Exit(1);
+        throw new InvalidOperationException("HTTPS configuration is invalid.");
+    }
+}
 const long maxSize = 10L * 1024 * 1024 * 1024;
-builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = maxSize);
+builder.WebHost.ConfigureKestrel(o =>
+{
+    // Explicit listeners also prevent --urls or Kestrel configuration from adding
+    // an unintended plaintext LAN endpoint to a secure sharing run.
+    o.Configure(new ConfigurationBuilder().Build());
+    o.Limits.MaxRequestBodySize = maxSize;
+    o.Listen(IPAddress.Loopback, port);
+    if (secureTransport)
+        o.Listen(ip, httpsPort, listener => listener.UseHttps(serverCertificate!, https => https.SslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13));
+    else if (!IPAddress.IsLoopback(ip)) o.Listen(ip, port);
+});
 var app = builder.Build();
 string Secret() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
 object Error(string code, string message) => new { code, error = message };
@@ -49,6 +79,14 @@ var outboxLease = StorageSafety.CreateRunLease(outbox);
 bool IsAdmin(HttpContext c) => c.Connection.RemoteIpAddress is { } remote && IPAddress.IsLoopback(remote) && c.Request.Headers["X-LanDrop-Admin"] == admin;
 Device? GetDevice(HttpContext c) => sessions.TryGetValue(c.Request.Headers["X-LanDrop-Session"].ToString(), out var d) && d.Expires > DateTimeOffset.UtcNow ? d : null;
 bool Allowed(HttpContext c) => IsAdmin(c) || GetDevice(c)?.Approved == true;
+IResult DownloadFile(HttpContext c, SharedFile file)
+{
+    if (file.Name.All(ch => ch <= 127)) return Results.File(file.Path, "application/octet-stream", file.Name, enableRangeProcessing: true);
+    // WebKit can prefer the lossy ASCII fallback over filename*. For Unicode
+    // names supply only the standards UTF-8 parameter and let Results.File keep it.
+    c.Response.GetTypedHeaders().ContentDisposition = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue("attachment") { FileNameStar = file.Name };
+    return Results.File(file.Path, "application/octet-stream", enableRangeProcessing: true);
+}
 bool Reserved(string name) { var stem = name.Split('.')[0].TrimEnd(' ', '.').ToUpperInvariant(); return stem is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$" || (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && "123456789\u00b9\u00b2\u00b3".Contains(stem[3])); }
 bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Length <= 180 && name is not "." and not ".." && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && !name.Contains('/') && !name.Contains('\\') && !name.EndsWith('.') && !name.EndsWith(' ') && !Reserved(name);
 void PruneOffers()
@@ -86,7 +124,9 @@ void Track(TransferEntry entry)
 }
 app.Use(async (c, next) =>
 {
-    if (!IPAddress.TryParse(c.Request.Host.Host, out _) && c.Request.Host.Host != "localhost") { c.Response.StatusCode = 400; await c.Response.WriteAsJsonAsync(Error("invalid_host", "Invalid request host.")); return; }
+    var host = c.Request.Host.Host;
+    var validHost = c.Request.IsHttps ? host == listeningAddress : host is "127.0.0.1" or "localhost" || (!secureTransport && host == listeningAddress);
+    if (!validHost) { c.Response.StatusCode = 400; await c.Response.WriteAsJsonAsync(Error("invalid_host", "Invalid request host.")); return; }
     c.Response.Headers.CacheControl = "no-store";
     c.Response.Headers["X-Content-Type-Options"] = "nosniff";
     c.Response.Headers["Referrer-Policy"] = "no-referrer";
@@ -120,7 +160,7 @@ app.MapGet("/api/admin", (HttpContext c) =>
     lock (gate)
     {
         PruneOffers();
-        return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId, f.Sha256, verified = true }).ToArray(), offers = offers.Values.Where(o => o.BatchId is null && o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray(), batches = batches.Values.Where(b => BatchStatus(b) == "pending").Select(b => new { b.Id, b.DeviceId, b.DeviceName, totalSize = b.OfferIds.Sum(id => offers[id].Size), expires = b.OfferIds.Max(id => offers[id].Expires), files = b.OfferIds.Select(id => { var o = offers[id]; return new { o.Id, o.Name, o.Size }; }).ToArray() }).ToArray(), transfers = transfers.Values.OrderByDescending(t => t.Updated).ToArray() });
+        return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, secureTransport, httpsPort = secureTransport ? httpsPort : (int?)null, certificateFingerprint, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId, f.Sha256, verified = true }).ToArray(), offers = offers.Values.Where(o => o.BatchId is null && o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray(), batches = batches.Values.Where(b => BatchStatus(b) == "pending").Select(b => new { b.Id, b.DeviceId, b.DeviceName, totalSize = b.OfferIds.Sum(id => offers[id].Size), expires = b.OfferIds.Max(id => offers[id].Expires), files = b.OfferIds.Select(id => { var o = offers[id]; return new { o.Id, o.Name, o.Size }; }).ToArray() }).ToArray(), transfers = transfers.Values.OrderByDescending(t => t.Updated).ToArray() });
     }
 });
 app.MapPost("/api/admin/shutdown", (HttpContext c) => { if (!IsAdmin(c)) return Results.Unauthorized(); c.Response.OnCompleted(() => { app.Lifetime.StopApplication(); return Task.CompletedTask; }); return Results.Ok(); });
@@ -133,7 +173,7 @@ app.MapGet("/api/admin/qr", (HttpContext c, string address) =>
 {
     if (!IsAdmin(c)) return Results.Unauthorized();
     if (address != listeningAddress) return Results.BadRequest(Error("invalid_address", "The QR address must match the selected listening address."));
-    string link; lock (gate) link = $"http://{address}:{port}/#pair={pairing}";
+    string link; lock (gate) link = $"{(secureTransport ? "https" : "http")}://{address}:{(secureTransport ? httpsPort : port)}/#pair={pairing}";
     using var data = QRCodeGenerator.GenerateQrCode(link, QRCodeGenerator.ECCLevel.M); using var qr = new SvgQRCode(data); return Results.Ok(new { link, svg = qr.GetGraphic(5) });
 });
 app.MapPost("/api/pair", (PairRequest request) =>
@@ -407,10 +447,10 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
     }
     finally { try { StorageSafety.ValidateFolder(directory); if (File.Exists(temp)) File.Delete(temp); } finally { lock (gate) { if (volume is not null && diskRemaining != 0) diskReservations[volume] = diskReservations.GetValueOrDefault(volume) - diskRemaining; } if (!committed) { lock (gate) { reservedBytes -= length; reservedFiles--; } } slots.Release(); } }
 });
-app.MapGet("/api/files/{id}", (HttpContext c, string id) => { if (!Allowed(c)) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || (!IsAdmin(c) && f.RecipientId != GetDevice(c)?.Id) || !File.Exists(f.Path)) return Results.NotFound(); return Results.File(f.Path, "application/octet-stream", f.Name, enableRangeProcessing: true); });
+app.MapGet("/api/files/{id}", (HttpContext c, string id) => { if (!Allowed(c)) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || (!IsAdmin(c) && f.RecipientId != GetDevice(c)?.Id) || !File.Exists(f.Path)) return Results.NotFound(); return DownloadFile(c, f); });
 app.MapDelete("/api/admin/files/{id}", (HttpContext c, string id) => { if (!IsAdmin(c)) return Results.Unauthorized(); lock (gate) { if (files.TryGetValue(id, out var f)) { if (f.Direction == "outbound") File.Delete(f.Path); if (files.TryRemove(id, out _)) { if (f.Direction == "outbound") reservedBytes -= f.Size; reservedFiles--; } } } return Results.Ok(); });
-app.MapPost("/api/download-session", (HttpContext c) => { if (GetDevice(c)?.Approved != true) return Results.Unauthorized(); c.Response.Cookies.Append("landrop-download", c.Request.Headers["X-LanDrop-Session"].ToString(), new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, MaxAge = TimeSpan.FromHours(8), Path = "/download" }); return Results.Ok(); });
-app.MapGet("/download/{id}", (HttpContext c, string id) => { if (!sessions.TryGetValue(c.Request.Cookies["landrop-download"] ?? "", out var d) || !d.Approved || d.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || f.RecipientId != d.Id || !File.Exists(f.Path)) return Results.NotFound(); return Results.File(f.Path, "application/octet-stream", f.Name, enableRangeProcessing: true); });
+app.MapPost("/api/download-session", (HttpContext c) => { if (GetDevice(c)?.Approved != true) return Results.Unauthorized(); c.Response.Cookies.Append("landrop-download", c.Request.Headers["X-LanDrop-Session"].ToString(), new CookieOptions { HttpOnly = true, Secure = secureTransport, SameSite = SameSiteMode.Strict, MaxAge = TimeSpan.FromHours(8), Path = "/download" }); return Results.Ok(); });
+app.MapGet("/download/{id}", (HttpContext c, string id) => { if (!sessions.TryGetValue(c.Request.Cookies["landrop-download"] ?? "", out var d) || !d.Approved || d.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || f.RecipientId != d.Id || !File.Exists(f.Path)) return Results.NotFound(); return DownloadFile(c, f); });
 app.Lifetime.ApplicationStarted.Register(() => { var url = $"http://127.0.0.1:{port}/#admin={admin}"; Console.WriteLine($"LAN Drop administration: {url}"); if (builder.Configuration.GetValue("OpenBrowser", true)) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); });
 app.Lifetime.ApplicationStopped.Register(() => { outboxLease.Dispose(); try { StorageSafety.CleanupRun(outbox); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or UnsafeStorageException or JsonException) { } });
 app.Run();

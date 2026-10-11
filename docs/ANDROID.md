@@ -16,4 +16,4 @@ Uploads may be interrupted by screen locking, app switching, sleep or network ch
 
 Automated protocol and browser tests do not prove physical-device compatibility. Actual Android file pickers, QR-camera flow, gallery visibility, storage permissions, download notifications, background behavior and large-file performance must be checked on real hardware. Record Android version, phone model, Chrome version and network type when reporting an issue. Do not share pairing URLs, session tokens or personal files in public reports.
 
-HTTP remains unencrypted. Checksums check accidental corruption on the PC; they do not independently verify Android's downloaded copy or provide encryption.
+The Windows app defaults to HTTPS in rc.2. Establish explicit phone trust following [HTTPS setup](HTTPS.md) before scanning the secure QR. The optional HTTP preview remains unencrypted. Checksums check accidental corruption on the PC; they do not independently verify Android's downloaded copy or replace TLS validation.
