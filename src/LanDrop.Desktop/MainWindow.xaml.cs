@@ -25,7 +25,7 @@ using Forms = System.Windows.Forms;
 namespace LanDrop.Desktop;
 public partial class MainWindow : Window
 {
-    private readonly string dataDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LanDrop");
+    private readonly string dataDirectory = App.TestDataDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LanDrop");
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromHours(4) };
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly Forms.NotifyIcon tray = new() { Icon = System.Drawing.SystemIcons.Application, Text = "LAN Drop" };
@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private bool polling, closing, uploading, stopping;
     private Task? stopTask;
     private int generation;
+    private int? lastStopExitCode;
     private CancellationTokenSource? transfer;
     private ServerState? lastState;
     private string settingsPath => Path.Combine(dataDirectory, "desktop.json");
@@ -49,14 +50,16 @@ public partial class MainWindow : Window
         try { if (!App.SmokeTest && File.Exists(settingsPath)) settings = JsonSerializer.Deserialize<DesktopSettings>(File.ReadAllText(settingsPath)) ?? new(); } catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
         LanguagePicker.ItemsSource = new[] { new LanguageChoice("en", "English"), new LanguageChoice("cs", "Čeština"), new LanguageChoice("auto", "Automatic / Automaticky") };
         LanguagePicker.DisplayMemberPath = "Name"; LanguagePicker.SelectedValuePath = "Code"; LanguagePicker.SelectedValue = settings.Language;
-        Network.ItemsSource = NetworkInterface.GetAllNetworkInterfaces().Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-          .SelectMany(n => n.GetIPProperties().UnicastAddresses.Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
-          .Select(a => new NetworkChoice(a.Address.ToString(), $"{n.Name} · {a.Address}"))).Append(new NetworkChoice("127.0.0.1", "Local test · 127.0.0.1")).ToArray();
+        RefreshNetworks();
         Network.SelectedValue = settings.Address; // User explicitly chooses the network; sharing stays off at startup.
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(() => { Show(); WindowState = WindowState.Normal; Activate(); });
         timer.Tick += async (_, _) => await Poll();
         Closing += ClosingWindow;
-        Loaded += (_, _) => { if (App.SmokeTest) { Application.Current.Shutdown(0); return; } Status.Text = T("Stopped"); };
+        Loaded += async (_, _) => {
+            if (App.LifecycleTest) { await RunLifecycleTest(); return; }
+            if (App.SmokeTest) { Application.Current.Shutdown(0); return; }
+            Status.Text = T("Stopped");
+        };
         ApplyLanguage();
     }
     private Dictionary<string,string> LoadLanguage(string code)
@@ -78,18 +81,34 @@ public partial class MainWindow : Window
         settings = settings with { Language = code };
         var resolved = code == "auto" ? (CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "cs" ? "cs" : "en") : code;
         translations = LoadLanguage(resolved);
-        try { if (!App.SmokeTest) SaveSettings(); } catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { Status.Text = T("OperationFailed"); }
+        try { if (!App.SmokeTest && !App.LifecycleTest) SaveSettings(); } catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { Status.Text = T("OperationFailed"); }
         ApplyLanguage();
     }
     private void ApplyLanguage()
     {
+        RefreshNetworks();
         Subtitle.Text = T("Subtitle"); SecurityNote.Text = T("SecurityNote"); NetworkLabel.Text = T("NetworkLabel");
         ConnectionGroup.Header = T("Connect"); FolderGroup.Header = T("Folder"); DevicesGroup.Header = T("Devices");
         SendGroup.Header = T("Send"); FilesGroup.Header = T("Files"); RecipientLabel.Text = T("Recipient");
-        foreach (var pair in new[] { (StartButton,"Start"),(StopButton,"Stop"),(NewQrButton,"NewQr"),(CopyLinkButton,"CopyLink"),(ChooseFolderButton,"ChooseFolder"),(OpenFolderButton,"OpenFolder"),(SendButton,"ChooseFiles"),(CancelButton,"Cancel"),(HideButton,"Hide") }) pair.Item1.Content = T(pair.Item2);
+        foreach (var pair in new[] { (StartButton,"Start"),(StopButton,"Stop"),(NewQrButton,"NewQr"),(CopyLinkButton,"CopyLink"),(ChooseFolderButton,"ChooseFolder"),(OpenFolderButton,"OpenFolder"),(SendButton,"ChooseFiles"),(CancelButton,"Cancel"),(HideButton,"Hide"),(DiagnosticsButton,"Diagnostics") }) pair.Item1.Content = T(pair.Item2);
         VersionText.Text = "LAN Drop " + (Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "development");
         if(server is null) Status.Text = T("Stopped");
         if(lastState is not null) RenderState(lastState);
+    }
+    private void RefreshNetworks()
+    {
+        var selected = Network.SelectedValue as string ?? settings.Address;
+        Network.ItemsSource = NetworkDiagnostics.Interfaces().Select(n => n with { Label = (n.Profile == NetworkProfile.Loopback ? T("AdapterLoopback") : n.Name) + " · " + n.Address + " · " + T(n.AdapterType) + " · " + T("Profile" + n.Profile) }).ToArray();
+        Network.SelectedValue = selected;
+    }
+    private void ShowDiagnostics(object sender, RoutedEventArgs e)
+    {
+        RefreshNetworks();
+        var selected = Network.SelectedItem as NetworkChoice;
+        var detail = T("DiagnosticSelected") + ": " + (selected?.Label ?? T("SelectNetwork")) + "\n" +
+            T("DiagnosticBound") + ": " + (server is null ? T("Stopped") : settings.Address ?? "—") + "\n" +
+            T("DiagnosticServer") + ": " + (server is null || server.HasExited ? T("Stopped") : T("Running")) + "\n\n" + T("DiagnosticHelp");
+        MessageBox.Show(this, detail, T("Diagnostics"), MessageBoxButton.OK, MessageBoxImage.Information);
     }
     private string FindServer()
     {
@@ -104,9 +123,12 @@ public partial class MainWindow : Window
         }
         throw new IOException(T("ServerMissing"));
     }
-    private async void StartSharing(object sender, RoutedEventArgs e)
+    private async void StartSharing(object sender, RoutedEventArgs e) => await StartServer();
+    private async Task StartServer()
     {
         if(server is not null || Network.SelectedValue is not string address) { Status.Text = T("SelectNetwork"); return; }
+        RefreshNetworks();
+        if(Network.SelectedItem is not NetworkChoice selected || !NetworkDiagnostics.CanShare(selected.Profile)) { Status.Text = T("NetworkBlocked"); return; }
         StartButton.IsEnabled = false; Network.IsEnabled = false;
         try
         {
@@ -114,7 +136,7 @@ public partial class MainWindow : Window
             using var socket = new TcpListener(IPAddress.Loopback, 0); socket.Start(); var port = ((IPEndPoint)socket.LocalEndpoint).Port; socket.Stop();
             var launch = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             launch.WorkingDirectory = Directory.Exists(Path.Combine(Path.GetDirectoryName(executable)!, "wwwroot")) ? Path.GetDirectoryName(executable)! : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(executable)!, "..", "..", ".."));
-            foreach(var argument in new[] { "--OpenBrowser=false", "--ListenAddress=" + address, "--Port=" + port, "--DataDirectory=" + dataDirectory }) launch.ArgumentList.Add(argument);
+            foreach(var argument in new[] { "--OpenBrowser=false", "--ListenAddress=" + address, "--Port=" + port, "--DataDirectory=" + dataDirectory, "--contentRoot=" + launch.WorkingDirectory }) launch.ArgumentList.Add(argument);
             var ready = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             server = new Process { StartInfo = launch, EnableRaisingEvents = true };
             server.OutputDataReceived += (_, args) => { var line = args.Data; if(line is null) return; var index = line.IndexOf("http://127.0.0.1:",StringComparison.Ordinal); if(index >= 0 && line.Contains("#admin=")) ready.TrySetResult(line[index..].Trim()); };
@@ -129,7 +151,29 @@ public partial class MainWindow : Window
             tray.Visible = true; timer.Start(); await Poll(); await RefreshQr();
         }
         catch(Exception ex) when(ex is IOException or InvalidOperationException or TimeoutException or HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
-        { Status.Text = T("ServerFailed"); await StopServer(); }
+        { await StopServer(); Status.Text = T("ServerFailed"); }
+    }
+    private async Task RunLifecycleTest()
+    {
+        var result = 1;
+        try
+        {
+            if(App.TestDataDirectory is null) throw new IOException("Explicit test directory required.");
+            Network.SelectedValue = "127.0.0.1";
+            await StartServer();
+            if(server is null || lastState is null) throw new IOException("Server failed to start or poll.");
+            var folder = Path.Combine(dataDirectory, "Inbox");
+            Directory.CreateDirectory(folder);
+            await Api("/api/admin/folder", HttpMethod.Post, new { path = folder });
+            await Poll();
+            if(lastState?.Inbox != folder) throw new IOException("Folder roundtrip failed.");
+            await StopServer();
+            if(server is not null || lastStopExitCode != 0) throw new IOException("Server did not stop gracefully.");
+            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, ServerExitCode = lastStopExitCode }));
+            result = 0;
+        }
+        catch(Exception) { await StopServer(); }
+        finally { closing = true; tray.Dispose(); http.Dispose(); Application.Current.Shutdown(result); }
     }
     private async Task<JsonElement> Api(string path, HttpMethod? method = null, object? body = null, CancellationToken token = default)
     {
@@ -227,7 +271,16 @@ public partial class MainWindow : Window
                 using var request = new HttpRequestMessage(HttpMethod.Put,baseUrl+"/api/files?name="+Uri.EscapeDataString(info.Name)+"&recipient="+Uri.EscapeDataString(recipient));
                 request.Headers.Add("X-LanDrop-Admin",adminKey);
                 await using var file = File.OpenRead(path);
-                using var progress = new ProgressReadStream(file, read => Dispatcher.InvokeAsync(() => { UploadProgress.Value = info.Length == 0 ? 100 : read*100d/info.Length; ProgressText.Text = info.Name + " · " + Math.Round(UploadProgress.Value) + " %"; }));
+                var clock = Stopwatch.StartNew();
+                using var progress = new ProgressReadStream(file, read => {
+                    var seconds = Math.Max(clock.Elapsed.TotalSeconds, 0.001);
+                    var speed = read / seconds;
+                    var remaining = speed > 0 ? TimeSpan.FromSeconds(Math.Max(0, info.Length-read) / speed) : TimeSpan.Zero;
+                    Dispatcher.InvokeAsync(() => {
+                        UploadProgress.Value = info.Length == 0 ? 100 : read*100d/info.Length;
+                        ProgressText.Text = info.Name + " · " + Math.Round(UploadProgress.Value) + " % · " + (speed/1048576).ToString("N1") + " MB/s · " + T("Eta") + " " + remaining.ToString(@"hh\:mm\:ss");
+                    });
+                });
                 request.Content = new StreamContent(progress); request.Content.Headers.ContentLength = info.Length;
                 using var response = await http.SendAsync(request,transfer.Token);
                 if(!response.IsSuccessStatusCode) throw new IOException(T("OperationFailed")+" ("+(int)response.StatusCode+")");
@@ -250,6 +303,7 @@ public partial class MainWindow : Window
         {
             try { if(!owned.HasExited) { using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3)); await Api("/api/admin/shutdown",HttpMethod.Post,token:deadline.Token); await owned.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5)); } }
             catch(Exception e) when(e is IOException or HttpRequestException or TimeoutException or InvalidOperationException or OperationCanceledException) { if(!owned.HasExited) owned.Kill(true); await owned.WaitForExitAsync(); }
+            lastStopExitCode = owned.ExitCode;
             owned.Dispose();
         }
         baseUrl = adminKey = null; lastState = null; DevicesPanel.Children.Clear(); FilesPanel.Children.Clear(); Recipient.ItemsSource = null;
@@ -263,7 +317,7 @@ public partial class MainWindow : Window
     }
 }
 record LanguageChoice(string Code,string Name);
-record NetworkChoice(string Address,string Label);
+
 record DesktopSettings(string Language = "en",string? Address = null);
 record DeviceInfo(string Id,string Name,bool Approved);
 record FileInfoDto(string Id,string Name,long Size,string Direction);
@@ -272,13 +326,16 @@ record ServerState(string Inbox,DeviceInfo[] Devices,FileInfoDto[] Files);
 sealed class ProgressReadStream(Stream inner,Action<long> progress) : Stream
 {
     private long count;
+    private readonly Stopwatch clock = Stopwatch.StartNew();
+    private long lastReport = -250;
+    private void Report() { var now = clock.ElapsedMilliseconds; if(now-lastReport < 250) return; lastReport = now; progress(count); }
     public override bool CanRead => true;
     public override bool CanSeek => false;
     public override bool CanWrite => false;
     public override long Length => inner.Length;
     public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
-    public override int Read(byte[] buffer,int offset,int length) { var read = inner.Read(buffer,offset,length); count += read; progress(count); return read; }
-    public override async ValueTask<int> ReadAsync(Memory<byte> buffer,CancellationToken token = default) { var read = await inner.ReadAsync(buffer,token); count += read; progress(count); return read; }
+    public override int Read(byte[] buffer,int offset,int length) { var read = inner.Read(buffer,offset,length); count += read; Report(); return read; }
+    public override async ValueTask<int> ReadAsync(Memory<byte> buffer,CancellationToken token = default) { var read = await inner.ReadAsync(buffer,token); count += read; Report(); return read; }
     public override Task<int> ReadAsync(byte[] buffer,int offset,int length,CancellationToken token) => ReadAsync(buffer.AsMemory(offset,length),token).AsTask();
     public override void Flush() { }
     public override long Seek(long offset,SeekOrigin origin) => throw new NotSupportedException();

@@ -118,7 +118,7 @@ const translations = {
     "download": "Stáhnout",
     "networkError": "Spojení se přerušilo. Zkontroluj Wi-Fi a opakuj přenos.",
     "cancelled": "Přenos zrušen.",
-    "invalidSize": "Soubor musí mít velikost mezi 1 B a 10 GB.",
+    "invalidSize": "Soubor nesmí překročit velikost 10 GB.",
     "prepared": "Připraveno ke stažení v telefonu",
     "saved": "Uloženo na počítači",
     "done": "Hotovo. Soubory byly úspěšně přeneseny.",
@@ -139,6 +139,8 @@ const translations = {
 translations.en.loopback = 'Local-only mode. Restart LAN Drop with your Wi-Fi address to connect a phone.';
 translations.cs.loopback = 'Pouze místní režim. Pro připojení telefonu restartuj LAN Drop s adresou Wi-Fi adaptéru.';
 Object.assign(translations.en, {
+  unsafe_folder:'This folder uses a link or junction. Choose a direct local folder.',
+  insufficient_disk_space:'There is not enough free disk space. Choose another folder or free space.',
   "invalid_host": "Invalid request host.",
   "storage_failure": "Could not save the file. Check disk space and folder access.",
   "folder_access": "Cannot write to the destination folder.",
@@ -158,6 +160,8 @@ Object.assign(translations.en, {
   "transfer_cancelled": "The transfer was cancelled."
 });
 Object.assign(translations.cs, {
+  unsafe_folder:'Tato složka používá odkaz nebo junction. Vyber přímo místní složku.',
+  insufficient_disk_space:'Na disku není dost volného místa. Vyber jinou složku nebo uvolni místo.',
   "invalid_host": "Neplatná adresa požadavku.",
   "storage_failure": "Soubor nelze uložit. Zkontroluj volné místo a přístup ke složce.",
   "folder_access": "Do cílové složky nelze zapisovat.",
@@ -179,6 +183,16 @@ Object.assign(translations.cs, {
 translations.en.file_limit = 'The registered file limit is reached. Remove shared files or restart sharing.';
 translations.cs.file_limit = 'Byl dosažen limit evidovaných souborů. Odeber sdílené soubory nebo restartuj sdílení.';
 let languagePreference = 'en';
+Object.assign(translations.en, {
+  estimating:'Estimating time remaining…', etaSeconds:'about {value} s remaining',
+  etaMinutes:'about {value} min remaining', etaHours:'about {value} h remaining',
+  speedEta:'{speed}/s · {eta}', waitingForSave:'Waiting for the PC to finish saving…'
+});
+Object.assign(translations.cs, {
+  estimating:'Odhaduji zbývající čas…', etaSeconds:'zbývá přibližně {value} s',
+  etaMinutes:'zbývá přibližně {value} min', etaHours:'zbývá přibližně {value} h',
+  speedEta:'{speed}/s · {eta}', waitingForSave:'Čekám na dokončení zápisu na PC…'
+});
 try { languagePreference = localStorage.getItem('landrop-language') || 'en'; } catch {}
 function locale() { return languagePreference === 'auto' ? (navigator.language.toLowerCase().startsWith('cs') ? 'cs' : 'en') : (translations[languagePreference] ? languagePreference : 'en'); }
 function t(key, values = {}) { let text = translations[locale()][key] ?? translations.en[key] ?? key; for(const [name,value] of Object.entries(values)) text = text.replaceAll('{'+name+'}', value); return text; }

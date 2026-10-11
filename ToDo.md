@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-alpha.1**. An alpha number does not mean every release gate has passed.
+Current build: **0.2.0-alpha.2**. An alpha number does not mean every release gate has passed.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -10,9 +10,11 @@ Current build: **0.2.0-alpha.1**. An alpha number does not mean every release ga
 - [x] Upload concurrency and per-run storage quotas.
 - [x] Empty files and reserved Windows names.
 - [x] Two-device authorization tests.
-- [ ] Crash cleanup, reparse-point protection and free-space checks.
+- [x] Owned outbox crash cleanup, reparse-point checks and free-space checks.
+- [ ] Incomplete inbox recovery after a crash and stronger atomic path handling.
 - [ ] Physical iPhone: 20 photos to PC and a video back.
-- [ ] Network profile enforcement and actual firewall testing.
+- [x] Desktop start-time network profile gate.
+- [ ] Continuous profile monitoring and actual firewall testing.
 
 ## 0.2.0 — Windows usability
 - [x] Native WPF window and start/stop sharing.
@@ -22,15 +24,18 @@ Current build: **0.2.0-alpha.1**. An alpha number does not mean every release ga
 - [x] English/Czech/Automatic and translation parity tests.
 - [x] Portable preview packaging script and Windows CI.
 - [ ] Desktop interaction tests on a clean Windows machine.
-- [ ] Better server-start diagnosis and network profile information.
+- [x] Better server-start diagnosis and network profile information.
+- [x] Automated desktop/server start, folder selection and shutdown check.
 - [ ] Shared Core/Transport modules and typed client.
 - [ ] Theme selection and full accessibility verification.
 
 ## 0.3.0 — reliable transfers
-- [ ] Persistent queue/history, speed and time remaining.
+- [x] Upload speed and time remaining.
+- [ ] Persistent queue/history.
 - [ ] Repeat/retry and resumable chunked uploads.
 - [ ] Checksums and strict completion semantics.
-- [ ] Disk-space reservation and restart recovery.
+- [x] Concurrent disk-space reservation and owned outbox cleanup.
+- [ ] Transfer restart recovery.
 
 ## 0.4.0 — offers and secure transport
 - [ ] Receive offers with explicit transfer approval.

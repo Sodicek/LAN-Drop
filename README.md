@@ -11,12 +11,14 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 - Native Windows WPF window, network interface selection and explicit start/stop sharing.
 - Locally generated QR code, approval on the PC, short-lived pairing and revocable sessions.
 - Individual recipients: each phone can list/download only files addressed to it.
-- Multiple files uploaded sequentially, progress and cancellation; empty files supported.
+- Multiple files uploaded sequentially, progress, speed, time estimates and cancellation; empty files supported.
 - Streaming to disk with duplicate-name protection, Windows filename checks and incomplete-upload cleanup.
 - Destination folder dialog, persistent folder/network/language preferences and notification-area access.
 - English and Czech on Windows and the web; automatic language option and English fallback.
 - Default loopback-only server; optional single selected IPv4 interface for phone access.
 - Upload concurrency and per-run byte/file limits.
+- Desktop network diagnostics and a start-time gate for private/domain profiles.
+- Free-space checks, concurrent disk reservations and path checks that reject reparse points.
 
 ## Run from source
 
@@ -29,7 +31,7 @@ dotnet run --project src/LanDrop.Desktop -c Release --no-build
 
 Or double-click **Start-LAN-Drop.cmd**. It builds the solution and opens the Windows application.
 
-1. Choose the Wi-Fi or Ethernet interface connected to the phone's network.
+1. Choose the Wi-Fi or Ethernet interface connected to the phone's network. Desktop sharing requires a private or domain profile; public/unknown profiles are blocked.
 2. Click **Start sharing**, scan the QR on the phone and enter a device name.
 3. Approve that request on the PC. Generate a new QR to connect another phone.
 4. Choose a recipient before adding files on the PC. On the phone, use **Download**.
@@ -54,9 +56,9 @@ For a phone, explicitly bind your own local IPv4 address:
 dotnet run --project src/LanDrop -c Release --no-launch-profile -- --ListenAddress=192.168.1.20
 ```
 
-Replace the example address with your PC's address. Administration remains authenticated and loopback-only. The startup URL contains a temporary administrator secret; do not share it or publish console output.
+Replace the example address with your PC's address. The browser-only server does not enforce Windows network profiles; choose a trusted private network yourself. Administration remains authenticated and loopback-only. The startup URL contains a temporary administrator secret; do not share it or publish console output.
 
-Options: `--Port=45821`, `--OpenBrowser=false`, `--DataDirectory=<local-path>`, `--MaxConcurrentUploads=3`, `--MaxStoredBytes=21474836480`, `--MaxRegisteredFiles=1000`.
+Options: `--Port=45821`, `--OpenBrowser=false`, `--DataDirectory=<local-path>`, `--MaxConcurrentUploads=3`, `--MaxStoredBytes=21474836480`, `--MaxRegisteredFiles=1000`, `--DiskSafetyBufferBytes=67108864`.
 
 ## Languages
 
@@ -75,11 +77,15 @@ The output is `publish/LAN-Drop-win-x64/`. Run `LanDrop.Desktop.exe` and keep th
 ```powershell
 dotnet build LanDrop.slnx -c Release
 python tests/integration.py
+python tests/storage_safety.py
 node tests/localization.cjs
+node tests/progress.cjs
+dotnet run --project tests/NetworkPolicy -c Release
 dotnet run --project src/LanDrop.Desktop -c Release --no-build -- --smoke-test
+python tests/desktop_lifecycle.py
 ```
 
-Tests cover two-device authorization, pairing, recipient isolation, upload/download, cookies, ranges, filenames, duplicates, empty files, interrupted uploads and language resources. Tests use loopback and do not validate a real iPhone, Wi-Fi or firewall.
+Tests cover two-device authorization, pairing, recipient isolation, transfers, cookies, ranges, filenames, interrupted uploads, storage safety, language resources, progress calculations, profile policy and the real desktop/server lifecycle. Tests use loopback and do not validate a real iPhone, Wi-Fi or firewall.
 
 ## Known limitations
 
@@ -88,8 +94,9 @@ Tests cover two-device authorization, pairing, recipient isolation, upload/downl
 - Every approved phone may upload to the configured inbox; outgoing files are isolated by recipient.
 - The 10 GB per-file limit is a configured ceiling, not a benchmarked guarantee.
 - Byte quota is cumulative for the server run; deleting an outgoing share releases its bytes. Hiding incoming entries preserves their files and quota. Restart resets the quota; this is not total-disk accounting.
-- A crash may leave temporary files/copies. Automatic crash cleanup and reparse-point protection need additional work.
-- Adapter/profile diagnostics, automatic firewall setup, secure updates and an installer are pending.
+- Inactive owned outboxes are cleaned after a crash. Unmarked folders and completed inbox files are preserved; incomplete inbox files may remain.
+- Path checks reject reparse points but are not atomic protection against a hostile local process. Other disk consumers may fill free space between checks.
+- Desktop checks network profiles before starting; it does not continuously monitor profile changes or prove phone reachability. Automatic firewall setup, secure updates and an installer are pending.
 - Native client currently talks to a child server through authenticated loopback HTTP. The future Core/Transport split is not yet complete.
 
 See [product design](PRODUCT-DESIGN.md), [roadmap](ToDo.md), [changes](CHANGELOG.md) and [security policy](SECURITY.md). [Archived Czech design](docs/cs/PRODUCT-DESIGN.md) records the original proposal and may describe older behavior.

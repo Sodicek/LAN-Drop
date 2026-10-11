@@ -28,16 +28,21 @@ long reservedBytes = 0;
 var maxRegisteredFiles = Math.Max(1, builder.Configuration.GetValue("MaxRegisteredFiles", 1000));
 var reservedFiles = 0;
 var storage = Path.GetFullPath(builder.Configuration["DataDirectory"] ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LanDrop"));
-Directory.CreateDirectory(storage);
+StorageSafety.CreateFolder(storage);
+var diskSafetyBuffer = Math.Max(0, builder.Configuration.GetValue<long>("DiskSafetyBufferBytes", 64L * 1024 * 1024));
+var diskReservations = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 var settingsPath = Path.Combine(storage, "settings.json");
 var inbox = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "LAN-Drop");
 if (File.Exists(settingsPath))
 {
-    try { var saved = JsonSerializer.Deserialize<FolderRequest>(File.ReadAllText(settingsPath)); if (saved is not null && Path.IsPathFullyQualified(saved.Path) && !saved.Path.StartsWith(@"\\")) inbox = Path.GetFullPath(saved.Path); }
-    catch (Exception e) when (e is IOException or JsonException or ArgumentException) { }
+    try { var saved = JsonSerializer.Deserialize<FolderRequest>(File.ReadAllText(settingsPath)); if (saved is not null && Path.IsPathFullyQualified(saved.Path) && !saved.Path.StartsWith(@"\\")) inbox = StorageSafety.CreateFolder(saved.Path); }
+    catch (Exception e) when (e is IOException or JsonException or ArgumentException or UnsafeStorageException or UnauthorizedAccessException) { }
 }
-var outbox = Path.Combine(storage, "Outbox", Secret()[..12]);
-Directory.CreateDirectory(inbox); Directory.CreateDirectory(outbox);
+var outboxRoot = StorageSafety.CreateFolder(Path.Combine(storage, "Outbox"));
+StorageSafety.CleanupOutboxes(outboxRoot);
+var outbox = Path.Combine(outboxRoot, Secret()[..12]);
+StorageSafety.CreateFolder(inbox);
+var outboxLease = StorageSafety.CreateRunLease(outbox);
 bool IsAdmin(HttpContext c) => c.Connection.RemoteIpAddress is { } remote && IPAddress.IsLoopback(remote) && c.Request.Headers["X-LanDrop-Admin"] == admin;
 Device? GetDevice(HttpContext c) => sessions.TryGetValue(c.Request.Headers["X-LanDrop-Session"].ToString(), out var d) && d.Expires > DateTimeOffset.UtcNow ? d : null;
 bool Allowed(HttpContext c) => IsAdmin(c) || GetDevice(c)?.Approved == true;
@@ -51,6 +56,8 @@ app.Use(async (c, next) =>
     c.Response.Headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'";
     try { await next(c); }
     catch (OperationCanceledException) when (c.RequestAborted.IsCancellationRequested) { }
+    catch (UnsafeStorageException) { if (!c.Response.HasStarted) { c.Response.StatusCode = 400; await c.Response.WriteAsJsonAsync(Error("unsafe_folder", "The destination folder contains a link or redirected directory. Choose a local folder without links.")); } }
+    catch (InsufficientDiskSpaceException) { if (!c.Response.HasStarted) { c.Response.StatusCode = 507; await c.Response.WriteAsJsonAsync(Error("insufficient_disk_space", "There is not enough free disk space for this transfer.")); } }
     catch (IOException) { if (!c.Response.HasStarted) { c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(Error("storage_failure", "Could not save the file. Check disk space and folder access.")); } }
     catch (UnauthorizedAccessException) { if (!c.Response.HasStarted) { c.Response.StatusCode = 500; await c.Response.WriteAsJsonAsync(Error("folder_access", "Cannot write to the destination folder.")); } }
 });
@@ -120,10 +127,11 @@ app.MapPost("/api/admin/folder", (HttpContext c, FolderRequest request) =>
     try
     {
         if (!Path.IsPathFullyQualified(request.Path) || request.Path.StartsWith(@"\\")) return Results.BadRequest(Error("invalid_folder", "Choose an absolute local folder path."));
-        var path = Path.GetFullPath(request.Path); Directory.CreateDirectory(path);
+        var path = StorageSafety.CreateFolder(request.Path);
         lock (gate) { File.WriteAllText(settingsPath + ".tmp", JsonSerializer.Serialize(new FolderRequest(path))); File.Move(settingsPath + ".tmp", settingsPath, true); inbox = path; }
         return Results.Ok();
     }
+    catch (UnsafeStorageException) { return Results.BadRequest(Error("unsafe_folder", "Choose a local folder without links or redirected directories.")); }
     catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return Results.BadRequest(Error("invalid_folder", "Cannot use this folder. Check its path and permissions.")); }
 });
 app.MapGet("/api/state", (HttpContext c) => { var device = GetDevice(c); if (device is null && !IsAdmin(c)) return Results.Unauthorized(); return Results.Ok(new { approved = IsAdmin(c) || device!.Approved, files = (Allowed(c) ? files.Values.Where(f => f.Direction == "outbound" && (IsAdmin(c) || f.RecipientId == device!.Id)) : []).Select(f => new { f.Id, f.Name, f.Size }) }); });
@@ -140,26 +148,63 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient) =
     lock (gate) { if (reservedFiles >= maxRegisteredFiles) { slots.Release(); return Results.Json(Error("file_limit", "The registered file limit is reached. Remove shared files or restart sharing."), statusCode: 429); } if (length > maxStoredBytes - reservedBytes) { slots.Release(); return Results.Json(Error("storage_quota", "The storage quota is exceeded."), statusCode: 413); } reservedBytes += length; reservedFiles++; }
     using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, owner.Cancellation.Token);
     var committed = false; string directory; lock (gate) directory = local ? outbox : inbox;
+    string? volume = null; long diskRemaining = 0;
     var id = Secret()[..16]; var temp = Path.Combine(directory, $".landrop-{id}.part");
     try
     {
-        await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true)) await c.Request.Body.CopyToAsync(output, cancellation.Token);
+        StorageSafety.ValidateFolder(directory);
+        volume = StorageSafety.Volume(directory);
+        lock (gate)
+        {
+            var other = diskReservations.GetValueOrDefault(volume);
+            var available = StorageSafety.AvailableBytes(volume);
+            if (other > available || diskSafetyBuffer > available - other || length > available - other - diskSafetyBuffer)
+                throw new InsufficientDiskSpaceException();
+            diskReservations[volume] = other + length;
+            diskRemaining = length;
+        }
+        StorageSafety.ValidateFolder(directory);
+        await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
+        {
+            var buffer = new byte[65536]; long written = 0, nextCheck = 16L * 1024 * 1024;
+            while (true)
+            {
+                var read = await c.Request.Body.ReadAsync(buffer, cancellation.Token);
+                if (read == 0) break;
+                if (read > length - written) return Results.BadRequest(Error("incomplete_transfer", "The transfer length does not match its declared size."));
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellation.Token);
+                written += read;
+                lock (gate) { diskReservations[volume] -= read; diskRemaining -= read; }
+                if (written >= nextCheck)
+                {
+                    lock (gate)
+                    {
+                        var available = StorageSafety.AvailableBytes(volume);
+                        var remaining = diskReservations[volume];
+                        if (remaining > available || diskSafetyBuffer > available - remaining) throw new InsufficientDiskSpaceException();
+                    }
+                    nextCheck = written + 16L * 1024 * 1024;
+                }
+            }
+            await output.FlushAsync(cancellation.Token);
+        }
         cancellation.Token.ThrowIfCancellationRequested();
         if (!Allowed(c) || owner.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized();
         var size = new FileInfo(temp).Length; if (size != length) return Results.BadRequest(Error("incomplete_transfer", "The transfer was not completed."));
+        StorageSafety.ValidateFolder(directory);
         var final = Path.Combine(directory, name);
         try { File.Move(temp, final); } catch (IOException) when (File.Exists(final)) { final = Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(name)}-{id}{Path.GetExtension(name)}"); File.Move(temp, final); }
         var file = new SharedFile(id, Path.GetFileName(final), final, size, local ? "outbound" : "inbound", owner.Id); files[id] = file; committed = true; return Results.Ok(new { file.Id, file.Name, file.Size });
     }
     catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return Results.Json(Error("transfer_cancelled", "The transfer was cancelled."), statusCode: 409); }
-    finally { try { if (File.Exists(temp)) File.Delete(temp); } finally { if (!committed) { lock (gate) { reservedBytes -= length; reservedFiles--; } } slots.Release(); } }
+    finally { try { StorageSafety.ValidateFolder(directory); if (File.Exists(temp)) File.Delete(temp); } finally { lock (gate) { if (volume is not null && diskRemaining != 0) diskReservations[volume] = diskReservations.GetValueOrDefault(volume) - diskRemaining; } if (!committed) { lock (gate) { reservedBytes -= length; reservedFiles--; } } slots.Release(); } }
 });
 app.MapGet("/api/files/{id}", (HttpContext c, string id) => { if (!Allowed(c)) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || (!IsAdmin(c) && f.RecipientId != GetDevice(c)?.Id) || !File.Exists(f.Path)) return Results.NotFound(); return Results.File(f.Path, "application/octet-stream", f.Name, enableRangeProcessing: true); });
 app.MapDelete("/api/admin/files/{id}", (HttpContext c, string id) => { if (!IsAdmin(c)) return Results.Unauthorized(); lock (gate) { if (files.TryGetValue(id, out var f)) { if (f.Direction == "outbound") File.Delete(f.Path); if (files.TryRemove(id, out _)) { if (f.Direction == "outbound") reservedBytes -= f.Size; reservedFiles--; } } } return Results.Ok(); });
 app.MapPost("/api/download-session", (HttpContext c) => { if (GetDevice(c)?.Approved != true) return Results.Unauthorized(); c.Response.Cookies.Append("landrop-download", c.Request.Headers["X-LanDrop-Session"].ToString(), new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, MaxAge = TimeSpan.FromHours(8), Path = "/download" }); return Results.Ok(); });
 app.MapGet("/download/{id}", (HttpContext c, string id) => { if (!sessions.TryGetValue(c.Request.Cookies["landrop-download"] ?? "", out var d) || !d.Approved || d.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || f.RecipientId != d.Id || !File.Exists(f.Path)) return Results.NotFound(); return Results.File(f.Path, "application/octet-stream", f.Name, enableRangeProcessing: true); });
 app.Lifetime.ApplicationStarted.Register(() => { var url = $"http://127.0.0.1:{port}/#admin={admin}"; Console.WriteLine($"LAN Drop administration: {url}"); if (builder.Configuration.GetValue("OpenBrowser", true)) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); });
-app.Lifetime.ApplicationStopped.Register(() => { try { Directory.Delete(outbox, true); } catch (IOException) { } });
+app.Lifetime.ApplicationStopped.Register(() => { outboxLease.Dispose(); try { StorageSafety.CleanupRun(outbox); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or UnsafeStorageException or JsonException) { } });
 app.Run();
 record PairRequest(string Code, string? Name);
 record FolderRequest(string Path);

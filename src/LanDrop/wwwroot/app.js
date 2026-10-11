@@ -67,14 +67,31 @@ function renderFiles(files, local) {
 }
 function upload(file, index, count, recipientId) {
   return new Promise((resolve,reject) => {
+    const meter = new TransferMeter(file.size);
+    let lastRender = -Infinity;
+    const renderProgress = (loaded, force = false) => {
+      const now = performance.now();
+      if(!force && now - lastRender < 250 && loaded < file.size) return;
+      lastRender = now;
+      const sample = meter.sample(loaded);
+      $('progress').value = sample.percent;
+      const eta = sample.remainingSeconds === null ? t('estimating') :
+        sample.remainingSeconds >= 3600 ? t('etaHours', {value:Math.ceil(sample.remainingSeconds/3600)}) :
+        sample.remainingSeconds >= 60 ? t('etaMinutes', {value:Math.ceil(sample.remainingSeconds/60)}) :
+        t('etaSeconds', {value:sample.remainingSeconds});
+      const detail = loaded >= file.size ? t('waitingForSave') : t('speedEta', {speed:size(sample.speed), eta});
+      $('progress-text').textContent = index+'/'+count+' · '+file.name+' · '+Math.round(sample.percent)+' % · '+detail;
+    };
     const xhr = current = new XMLHttpRequest();
     xhr.open('PUT','/api/files?name='+encodeURIComponent(file.name)+(admin ? '&recipient='+encodeURIComponent(recipientId) : ''));
     for(const [k,v] of Object.entries(headers())) xhr.setRequestHeader(k,v);
     xhr.setRequestHeader('Content-Type','application/octet-stream');
-    xhr.upload.onprogress = e => { $('progress').value = e.lengthComputable ? e.loaded/e.total*100 : 0; $('progress-text').textContent = index+'/'+count+' · '+file.name+' · '+Math.round($('progress').value)+' %'; };
+    xhr.upload.onprogress = e => { if(e.lengthComputable) renderProgress(e.loaded); };
+    xhr.upload.onload = () => renderProgress(file.size, true);
     xhr.onload = () => { if(xhr.status >= 200 && xhr.status < 300) resolve(); else { let body; try { body = JSON.parse(xhr.responseText); } catch {} reject(new Error(errorMessage(body, xhr.status))); } };
     xhr.onerror = () => reject(new Error(t('networkError')));
     xhr.onabort = () => reject(new Error(t('cancelled')));
+    renderProgress(0, true);
     xhr.send(file);
   });
 }

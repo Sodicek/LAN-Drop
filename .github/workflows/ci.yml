@@ -32,13 +32,22 @@ jobs:
         run: |
           node --check src/LanDrop/wwwroot/app.js
           node --check src/LanDrop/wwwroot/i18n.js
+          node --check src/LanDrop/wwwroot/progress.js
       - name: Check localization coverage
         run: node tests/localization.cjs
+      - name: Check progress calculations
+        run: node tests/progress.cjs
       - name: Run HTTP integration checks
         run: python tests/integration.py
+      - name: Check Windows storage safety
+        run: python tests/storage_safety.py
+      - name: Check network profile policy
+        run: dotnet run --project tests/NetworkPolicy -c Release
       - name: Smoke test desktop window
         shell: pwsh
         run: |
           if (Test-Path src/LanDrop.Desktop/LanDrop.Desktop.csproj) {
             dotnet run --project src/LanDrop.Desktop -c Release --no-build -- --smoke-test
           }
+      - name: Check desktop server lifecycle
+        run: python tests/desktop_lifecycle.py

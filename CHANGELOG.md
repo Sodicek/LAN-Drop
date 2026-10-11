@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0-alpha.2 — 2026-10-11
+
+### Added
+- Read-only Windows adapter/profile diagnostics; desktop sharing blocks public and unknown profiles.
+- Upload speed and estimated time remaining in English and Czech.
+- Free-space admission checks, concurrent disk reservations and a safety buffer.
+- Reparse-point checks for inbox paths and cleanup of owned inactive outboxes after a crash.
+- Storage safety, network policy, progress and real desktop/server lifecycle checks in CI.
+
+### Fixed
+- Desktop server startup resolves bundled web assets from an absolute content root.
+- Startup errors remain visible after cleanup; browser uploads wait for the server's save response.
+
+### Known gaps
+- HTTP remains unencrypted; physical phone, firewall and clean-machine checks are pending.
+- Incomplete inbox files after a crash are not automatically recovered or removed.
+- Network profiles are checked before desktop sharing starts, not continuously while it runs.
+
 ## 0.2.0-alpha.1 — 2026-10-11
 
 Development preview; no stable-release claim.

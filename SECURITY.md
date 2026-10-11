@@ -10,6 +10,10 @@ The desktop controls the child server through authenticated loopback requests. L
 
 No automatic opening of received files, router port mapping or telemetry. Server startup console output contains an administrator secret and must not be shared.
 
+Desktop sharing checks the selected Windows profile before starting and blocks public/unknown profiles. This is not continuous monitoring, and the browser-only server does not apply that gate. Diagnostics do not modify firewall rules or prove reachability.
+
+Storage checks reject reparse points in destination paths, reserve space for concurrent uploads and retain a free-space buffer. They do not provide atomic protection against path replacement by a hostile local process or prevent unrelated programs consuming disk space. Crash cleanup only removes marked inactive outboxes with an available exclusive lease; completed inbox files and unmarked folders are preserved. Incomplete inbox files may remain after a crash.
+
 ## Reporting
 
 Do not post sensitive files, tokens or a working exploit with private data in a public issue. Use the repository's private vulnerability reporting feature if available. If unavailable, ask the maintainer for a private reporting channel using a public issue without exploit details.
