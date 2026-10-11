@@ -9,6 +9,7 @@ jobs:
     permissions:
       contents: read
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -75,6 +76,7 @@ jobs:
           LAN_DROP_SCREENSHOT_DIR: ${{ runner.temp }}/landrop-mobile-screenshots
         run: node tests/mobile_browser.cjs
       - name: Check trusted HTTPS in Chromium on the disposable CI runner
+        timeout-minutes: 3
         shell: pwsh
         env:
           LAN_DROP_SCREENSHOT_DIR: ${{ runner.temp }}/landrop-mobile-https-screenshots
