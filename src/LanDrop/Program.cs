@@ -22,6 +22,7 @@ var admin = Secret(); var pairing = Secret(); var pairingExpires = DateTimeOffse
 var gate = new object();
 var sessions = new ConcurrentDictionary<string, Device>();
 var files = new ConcurrentDictionary<string, SharedFile>();
+var offers = new Dictionary<string, ReceiveOffer>(); // All access is protected by gate.
 var slots = new SemaphoreSlim(Math.Max(1, builder.Configuration.GetValue("MaxConcurrentUploads", 3)));
 var maxStoredBytes = builder.Configuration.GetValue<long>("MaxStoredBytes", 20L * 1024 * 1024 * 1024);
 long reservedBytes = 0;
@@ -47,6 +48,16 @@ bool IsAdmin(HttpContext c) => c.Connection.RemoteIpAddress is { } remote && IPA
 Device? GetDevice(HttpContext c) => sessions.TryGetValue(c.Request.Headers["X-LanDrop-Session"].ToString(), out var d) && d.Expires > DateTimeOffset.UtcNow ? d : null;
 bool Allowed(HttpContext c) => IsAdmin(c) || GetDevice(c)?.Approved == true;
 bool Reserved(string name) { var stem = name.Split('.')[0].TrimEnd(' ', '.').ToUpperInvariant(); return stem is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$" || (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && "123456789\u00b9\u00b2\u00b3".Contains(stem[3])); }
+bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Length <= 180 && name is not "." and not ".." && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 && !name.Contains('/') && !name.Contains('\\') && !name.EndsWith('.') && !name.EndsWith(' ') && !Reserved(name);
+void PruneOffers()
+{
+    var now = DateTimeOffset.UtcNow;
+    foreach (var entry in offers.ToArray())
+        if (entry.Value.Status is "pending" or "approved" && (entry.Value.Expires <= now || !sessions.Values.Any(d => d.Id == entry.Value.DeviceId && d.Approved && d.Expires > now && !d.Cancellation.IsCancellationRequested)))
+            offers[entry.Key] = entry.Value with { Status = "expired" };
+    var terminal = offers.Values.Where(o => o.Status is not "pending" and not "approved").OrderByDescending(o => o.Expires).Skip(128).ToArray();
+    foreach (var old in terminal) offers.Remove(old.Id);
+}
 app.Use(async (c, next) =>
 {
     if (!IPAddress.TryParse(c.Request.Host.Host, out _) && c.Request.Host.Host != "localhost") { c.Response.StatusCode = 400; await c.Response.WriteAsJsonAsync(Error("invalid_host", "Invalid request host.")); return; }
@@ -80,7 +91,11 @@ app.MapGet("/api/admin", (HttpContext c) =>
 {
     if (!IsAdmin(c)) return Results.Unauthorized();
     foreach (var item in sessions.Where(s => s.Value.Expires <= DateTimeOffset.UtcNow)) if (sessions.TryRemove(item.Key, out var expired)) expired.Cancellation.Cancel();
-    lock (gate) return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId }) });
+    lock (gate)
+    {
+        PruneOffers();
+        return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId }).ToArray(), offers = offers.Values.Where(o => o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray() });
+    }
 });
 app.MapPost("/api/admin/shutdown", (HttpContext c) => { if (!IsAdmin(c)) return Results.Unauthorized(); c.Response.OnCompleted(() => { app.Lifetime.StopApplication(); return Task.CompletedTask; }); return Results.Ok(); });
 app.MapPost("/api/admin/pairing", (HttpContext c) => { if (!IsAdmin(c)) return Results.Unauthorized(); lock (gate) {
@@ -135,14 +150,83 @@ app.MapPost("/api/admin/folder", (HttpContext c, FolderRequest request) =>
     catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return Results.BadRequest(Error("invalid_folder", "Cannot use this folder. Check its path and permissions.")); }
 });
 app.MapGet("/api/state", (HttpContext c) => { var device = GetDevice(c); if (device is null && !IsAdmin(c)) return Results.Unauthorized(); return Results.Ok(new { approved = IsAdmin(c) || device!.Approved, files = (Allowed(c) ? files.Values.Where(f => f.Direction == "outbound" && (IsAdmin(c) || f.RecipientId == device!.Id)) : []).Select(f => new { f.Id, f.Name, f.Size }) }); });
-app.MapPut("/api/files", async (HttpContext c, string name, string? recipient) =>
+app.MapPost("/api/offers", (HttpContext c, OfferRequest request) =>
+{
+    var device = GetDevice(c);
+    if (device?.Approved != true) return Results.Unauthorized();
+    if (!ValidName(request.Name)) return Results.BadRequest(Error("invalid_filename", "Unsupported file name."));
+    if (request.Size < 0) return Results.BadRequest(Error("length_required", "A valid content length is required."));
+    if (request.Size > maxSize) return Results.Json(Error("file_too_large", "The file size limit is exceeded."), statusCode: 413);
+    lock (gate)
+    {
+        PruneOffers();
+        if (GetDevice(c)?.Approved != true || device.Cancellation.IsCancellationRequested) return Results.Unauthorized();
+        if (offers.Values.Count(o => o.Status is "pending" or "approved") >= 32) return Results.Json(Error("offer_limit", "Too many files are waiting for approval. Try again later."), statusCode: 429);
+        var offer = new ReceiveOffer(Secret()[..16], request.Name, request.Size, device.Id, device.Name, "pending", DateTimeOffset.UtcNow.AddMinutes(10));
+        offers.Add(offer.Id, offer);
+        return Results.Ok(new { offer.Id, offer.Status, offer.Expires });
+    }
+});
+app.MapGet("/api/offers/{id}", (HttpContext c, string id) =>
+{
+    var device = GetDevice(c); if (device?.Approved != true) return Results.Unauthorized();
+    lock (gate)
+    {
+        PruneOffers();
+        if (!offers.TryGetValue(id, out var offer) || offer.DeviceId != device.Id) return Results.NotFound();
+        return Results.Ok(new { offer.Id, offer.Name, offer.Size, offer.Status, offer.Expires });
+    }
+});
+app.MapDelete("/api/offers/{id}", (HttpContext c, string id) =>
+{
+    var device = GetDevice(c); if (device?.Approved != true) return Results.Unauthorized();
+    lock (gate)
+    {
+        PruneOffers();
+        if (!offers.TryGetValue(id, out var offer) || offer.DeviceId != device.Id) return Results.NotFound();
+        if (offer.Status is "pending" or "approved") offers[id] = offer with { Status = "rejected" };
+        PruneOffers();
+        return Results.Ok();
+    }
+});
+app.MapPost("/api/admin/offers/{id}/{action}", (HttpContext c, string id, string action) =>
+{
+    if (!IsAdmin(c)) return Results.Unauthorized();
+    if (action is not "approve" and not "reject") return Results.BadRequest(Error("invalid_action", "Unknown offer action."));
+    lock (gate)
+    {
+        PruneOffers();
+        if (!offers.TryGetValue(id, out var offer)) return Results.NotFound();
+        if (offer.Status == "expired") return Results.Json(Error("offer_expired", "The file offer has expired. Ask the phone to send a new request."), statusCode: 409);
+        if (offer.Status is not "pending" and not "approved") return Results.Json(Error("offer_not_approved", "This file offer is no longer available."), statusCode: 409);
+        offers[id] = offer with { Status = action == "approve" ? "approved" : "rejected" };
+        PruneOffers();
+        return Results.Ok();
+    }
+});
+app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, string? offer) =>
 {
     if (!Allowed(c)) return Results.Unauthorized();
-    if (string.IsNullOrWhiteSpace(name) || name.Length > 180 || name is "." or ".." || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name.Contains('/') || name.Contains('\\') || name.EndsWith('.') || name.EndsWith(' ') || Reserved(name)) return Results.BadRequest(Error("invalid_filename", "Unsupported file name."));
+    if (!ValidName(name)) return Results.BadRequest(Error("invalid_filename", "Unsupported file name."));
     if (c.Request.ContentLength is null or < 0) return Results.BadRequest(Error("length_required", "A valid content length is required."));
     if (c.Request.ContentLength > maxSize) return Results.Json(Error("file_too_large", "The file size limit is exceeded."), statusCode: 413);
     var local = IsAdmin(c); var owner = local ? sessions.Values.FirstOrDefault(d => d.Id == recipient && d.Approved && d.Expires > DateTimeOffset.UtcNow) : GetDevice(c);
     if (owner is null) return Results.BadRequest(Error("recipient_required", "Choose an approved recipient."));
+    if (!local)
+    {
+        lock (gate)
+        {
+            PruneOffers();
+            if (GetDevice(c)?.Approved != true || owner.Cancellation.IsCancellationRequested) return Results.Unauthorized();
+            if (string.IsNullOrEmpty(offer)) return Results.BadRequest(Error("offer_required", "Request approval on the PC before sending this file."));
+            if (!offers.TryGetValue(offer, out var requested) || requested.DeviceId != owner.Id) return Results.Json(Error("offer_not_approved", "This file has not been approved for this device."), statusCode: 409);
+            if (requested.Status == "expired") return Results.Json(Error("offer_expired", "The file offer has expired. Send a new request."), statusCode: 409);
+            if (requested.Status != "approved") return Results.Json(Error("offer_not_approved", "This file has not been approved or its approval was already used."), statusCode: 409);
+            if (requested.Name != name || requested.Size != c.Request.ContentLength.Value) return Results.BadRequest(Error("offer_mismatch", "The file name or size does not match the approved offer."));
+            offers[offer] = requested with { Status = "consumed" };
+            PruneOffers();
+        }
+    }
     if (!await slots.WaitAsync(0, c.RequestAborted)) return Results.Json(Error("upload_limit", "Too many active uploads. Try again shortly."), statusCode: 429);
     var length = c.Request.ContentLength.Value;
     lock (gate) { if (reservedFiles >= maxRegisteredFiles) { slots.Release(); return Results.Json(Error("file_limit", "The registered file limit is reached. Remove shared files or restart sharing."), statusCode: 429); } if (length > maxStoredBytes - reservedBytes) { slots.Release(); return Results.Json(Error("storage_quota", "The storage quota is exceeded."), statusCode: 413); } reservedBytes += length; reservedFiles++; }
@@ -210,3 +294,5 @@ record PairRequest(string Code, string? Name);
 record FolderRequest(string Path);
 record Device(string Id, string Name, bool Approved, DateTimeOffset Expires, CancellationTokenSource Cancellation);
 record SharedFile(string Id, string Name, string Path, long Size, string Direction, string RecipientId);
+record OfferRequest([property: System.Text.Json.Serialization.JsonRequired] string Name, [property: System.Text.Json.Serialization.JsonRequired] long Size);
+record ReceiveOffer(string Id, string Name, long Size, string DeviceId, string DeviceName, string Status, DateTimeOffset Expires);

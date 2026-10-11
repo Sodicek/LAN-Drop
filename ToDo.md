@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-alpha.2**. An alpha number does not mean every release gate has passed.
+Current build: **0.2.0-alpha.3**. An alpha number does not mean every release gate has passed.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -14,7 +14,8 @@ Current build: **0.2.0-alpha.2**. An alpha number does not mean every release ga
 - [ ] Incomplete inbox recovery after a crash and stronger atomic path handling.
 - [ ] Physical iPhone: 20 photos to PC and a video back.
 - [x] Desktop start-time network profile gate.
-- [ ] Continuous profile monitoring and actual firewall testing.
+- [x] Periodic desktop profile/address monitoring with automatic shutdown.
+- [ ] Actual firewall and network-change testing on physical devices.
 
 ## 0.2.0 — Windows usability
 - [x] Native WPF window and start/stop sharing.
@@ -38,7 +39,8 @@ Current build: **0.2.0-alpha.2**. An alpha number does not mean every release ga
 - [ ] Transfer restart recovery.
 
 ## 0.4.0 — offers and secure transport
-- [ ] Receive offers with explicit transfer approval.
+- [x] Per-file receive offers with explicit approval, rejection and cancellation.
+- [ ] Batch offers for selecting many photos with one approval.
 - [ ] Authenticated secure transport proven in Safari or revised native iOS scope.
 - [ ] Manual text/link sharing.
 - [ ] Safe image previews and optional ZIP download after device tests.

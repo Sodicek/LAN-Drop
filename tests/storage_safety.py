@@ -72,6 +72,17 @@ class Server:
             self.request("/api/admin/shutdown", "POST", b"")
             assert self.process.wait(timeout=10) == 0
 
+    def offer(self, name, size, phone):
+        offer = self.request("/api/offers", "POST", json.dumps({"name": name, "size": size}).encode(),
+                             {**phone, "Content-Type": "application/json"})
+        self.request(f"/api/admin/offers/{offer['id']}/approve", "POST", b"")
+        return offer["id"]
+
+    def upload(self, name, body, phone, expected=200):
+        offer = self.offer(name, len(body), phone)
+        path = "/api/files?" + urllib.parse.urlencode({"name": name, "offer": offer})
+        return self.request(path, "PUT", body, phone, expected)
+
     def kill(self):
         if self.process.poll() is None:
             self.process.kill()
@@ -91,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix="landrop-storage-") as directory:
     try:
         live = Server(data); servers.append(live)
         phone, recipient = live.phone()
-        received = live.request("/api/files?name=keep-inbound.txt", "PUT", b"received data", phone)
+        received = live.upload("keep-inbound.txt", b"received data", phone)
         live.request(f"/api/files?name=live-outbound.txt&recipient={recipient}", "PUT", b"live copy")
         live_runs = set((data / "Outbox").iterdir()) - {sentinel}
         assert len(live_runs) == 1
@@ -127,7 +138,7 @@ with tempfile.TemporaryDirectory(prefix="landrop-storage-") as directory:
         assert result.returncode == 0, result.stderr
         try:
             cleanerphone, _ = cleaner.phone()
-            assert cleaner.request("/api/files?name=redirected.bin", "PUT", b"x", cleanerphone, 400)["code"] == "unsafe_folder"
+            assert cleaner.upload("redirected.bin", b"x", cleanerphone, 400)["code"] == "unsafe_folder"
             assert not (target / "redirected.bin").exists()
         finally:
             os.rmdir(selected)
@@ -136,8 +147,12 @@ with tempfile.TemporaryDirectory(prefix="landrop-storage-") as directory:
 
         disk = Server(data, DiskSafetyBufferBytes=9223372036854775807); servers.append(disk)
         diskphone, _ = disk.phone()
-        error = disk.request("/api/files?name=no-space.bin", "PUT", b"x", diskphone, 507)
+        disk_offer = disk.offer("no-space.bin", 1, diskphone)
+        disk_path = f"/api/files?name=no-space.bin&offer={disk_offer}"
+        error = disk.request(disk_path, "PUT", b"x", diskphone, 507)
         assert error["code"] == "insufficient_disk_space"
+        replay = disk.request(disk_path, "PUT", b"x", diskphone, 409)
+        assert replay["code"] == "offer_not_approved"
         assert not (inbox / "no-space.bin").exists()
         assert not list(inbox.glob("*.part"))
         disk.stop(); cleaner.stop(); live.stop()

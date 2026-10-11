@@ -184,6 +184,28 @@ translations.en.file_limit = 'The registered file limit is reached. Remove share
 translations.cs.file_limit = 'Byl dosažen limit evidovaných souborů. Odeber sdílené soubory nebo restartuj sdílení.';
 let languagePreference = 'en';
 Object.assign(translations.en, {
+  offersTitle:'Incoming file requests', offersHelp:'Check the phone, file name and size before accepting.',
+  noOffers:'No incoming file requests.', acceptFile:'Accept file',
+  waitingForFileApproval:'Waiting for the PC to accept this file…',
+  offer_required:'Offer this file to the PC before sending it.',
+  offer_not_approved:'The PC has not accepted this file. Send a new request.',
+  offer_mismatch:'The file does not match the accepted request. Send a new request.',
+  offer_limit:'Too many file requests. Cancel old requests or wait for them to expire.',
+  offer_expired:'This file request has expired. Choose the file again.',
+  offer_rejected:'The PC declined this file.'
+});
+Object.assign(translations.cs, {
+  offersTitle:'Žádosti o příjem souborů', offersHelp:'Před přijetím zkontroluj telefon, název a velikost souboru.',
+  noOffers:'Žádné žádosti o příjem souborů.', acceptFile:'Přijmout soubor',
+  waitingForFileApproval:'Čekám, až počítač přijme tento soubor…',
+  offer_required:'Nejprve požádej počítač o přijetí souboru.',
+  offer_not_approved:'Počítač tento soubor nepřijal. Odešli novou žádost.',
+  offer_mismatch:'Soubor neodpovídá přijaté žádosti. Odešli novou žádost.',
+  offer_limit:'Příliš mnoho žádostí o soubory. Zruš staré žádosti nebo počkej na jejich vypršení.',
+  offer_expired:'Žádost o tento soubor vypršela. Vyber soubor znovu.',
+  offer_rejected:'Počítač tento soubor odmítl.'
+});
+Object.assign(translations.en, {
   estimating:'Estimating time remaining…', etaSeconds:'about {value} s remaining',
   etaMinutes:'about {value} min remaining', etaHours:'about {value} h remaining',
   speedEta:'{speed}/s · {eta}', waitingForSave:'Waiting for the PC to finish saving…'

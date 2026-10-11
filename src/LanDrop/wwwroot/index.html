@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LAN Drop</title><link rel="stylesheet" href="/style.css"><script src="/i18n.js" defer></script><script src="/progress.js" defer></script><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LAN Drop</title><link rel="stylesheet" href="/style.css"><script src="/i18n.js" defer></script><script src="/progress.js" defer></script><script src="/offers.js" defer></script><script src="/app.js" defer></script></head>
 <body>
 <header><a class="brand" href="/">LAN<span>DROP</span><small data-i18n="tagline">FILES. DIRECT.</small></a><span class="badge" data-i18n="network">● Local network</span><div class="language-control"><label for="language" data-i18n="language">Language</label><select id="language"><option value="en">English</option><option value="cs">Čeština</option><option value="auto" data-i18n="auto">Automatic (browser)</option></select></div></header>
 <main>
@@ -12,6 +12,7 @@
 <section class="card"><div class="section-head"><h2 data-i18n="pairTitle">01 / Connect a phone</h2><button id="renew" class="secondary" data-i18n="newQr">New QR</button></div><label for="address" data-i18n="address">Computer network address</label><select id="address"></select><p id="listen-note" class="muted" data-i18n="loopback" hidden>Local-only mode. Restart LAN Drop with your Wi-Fi address to connect a phone.</p><div id="qr"></div><a id="pair-link" class="link" target="_blank" rel="noreferrer" data-i18n="pairLink">Open pairing link</a><p id="expiry" class="muted"></p><p class="muted" data-i18n="networkHelp">Connect both devices to the same Wi-Fi. If the page does not open, check the private network and Windows firewall.</p></section>
 <section class="card"><h2 data-i18n="devicesTitle">02 / Connected devices</h2><div id="devices"></div><hr><h2 data-i18n="folderTitle">Where to save files from your phone</h2><form id="folder-form"><label for="folder" data-i18n="folder">Destination folder on PC</label><input id="folder" required><button class="secondary" data-i18n="useFolder">Use folder</button></form><p class="muted" data-i18n="folderHelp">Received files stay in this folder after the app closes.</p></section>
 </div>
+<section id="offer-section" class="card" hidden><h2 data-i18n="offersTitle">Incoming file requests</h2><p class="muted" data-i18n="offersHelp">Check the phone, file name and size before accepting.</p><div id="offers"></div></section>
 <section id="waiting" class="card" hidden><div class="pulse"></div><h2 data-i18n="waitingTitle">Waiting for approval on PC…</h2><p data-i18n="waitingHelp">Approve the connection in the device list on your computer.</p></section>
 <section id="transfer" class="card" hidden><div class="section-head"><h2 id="transfer-title" data-i18n="send">Send files</h2><span class="badge" data-i18n="limit">Up to 10 GB / file</span></div>
 <div id="recipient-control" hidden><label for="recipient" data-i18n="recipient">Send to</label><select id="recipient"></select></div>

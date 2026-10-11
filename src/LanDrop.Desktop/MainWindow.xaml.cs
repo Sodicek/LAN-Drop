@@ -28,6 +28,8 @@ public partial class MainWindow : Window
     private readonly string dataDirectory = App.TestDataDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LanDrop");
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromHours(4) };
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private readonly DispatcherTimer networkTimer = new() { Interval = TimeSpan.FromSeconds(15) };
+    private bool checkingNetwork;
     private readonly Forms.NotifyIcon tray = new() { Icon = System.Drawing.SystemIcons.Application, Text = "LAN Drop" };
     private readonly Dictionary<string, string> english;
     private Dictionary<string, string> translations;
@@ -54,6 +56,7 @@ public partial class MainWindow : Window
         Network.SelectedValue = settings.Address; // User explicitly chooses the network; sharing stays off at startup.
         tray.DoubleClick += (_, _) => Dispatcher.Invoke(() => { Show(); WindowState = WindowState.Normal; Activate(); });
         timer.Tick += async (_, _) => await Poll();
+        networkTimer.Tick += async (_, _) => await CheckSharingNetwork();
         Closing += ClosingWindow;
         Loaded += async (_, _) => {
             if (App.LifecycleTest) { await RunLifecycleTest(); return; }
@@ -89,6 +92,7 @@ public partial class MainWindow : Window
         RefreshNetworks();
         Subtitle.Text = T("Subtitle"); SecurityNote.Text = T("SecurityNote"); NetworkLabel.Text = T("NetworkLabel");
         ConnectionGroup.Header = T("Connect"); FolderGroup.Header = T("Folder"); DevicesGroup.Header = T("Devices");
+        OffersGroup.Header = T("IncomingOffers"); OffersHelp.Text = T("OffersHelp");
         SendGroup.Header = T("Send"); FilesGroup.Header = T("Files"); RecipientLabel.Text = T("Recipient");
         foreach (var pair in new[] { (StartButton,"Start"),(StopButton,"Stop"),(NewQrButton,"NewQr"),(CopyLinkButton,"CopyLink"),(ChooseFolderButton,"ChooseFolder"),(OpenFolderButton,"OpenFolder"),(SendButton,"ChooseFiles"),(CancelButton,"Cancel"),(HideButton,"Hide"),(DiagnosticsButton,"Diagnostics") }) pair.Item1.Content = T(pair.Item2);
         VersionText.Text = "LAN Drop " + (Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "development");
@@ -148,7 +152,7 @@ public partial class MainWindow : Window
             settings = settings with { Address = address }; SaveSettings();
             StopButton.IsEnabled = ChooseFolderButton.IsEnabled = OpenFolderButton.IsEnabled = NewQrButton.IsEnabled = true;
             Status.Text = T("Running") + " · " + address;
-            tray.Visible = true; timer.Start(); await Poll(); await RefreshQr();
+            tray.Visible = true; timer.Start(); networkTimer.Start(); await Poll(); await RefreshQr();
         }
         catch(Exception ex) when(ex is IOException or InvalidOperationException or TimeoutException or HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         { await StopServer(); Status.Text = T("ServerFailed"); }
@@ -162,6 +166,41 @@ public partial class MainWindow : Window
             Network.SelectedValue = "127.0.0.1";
             await StartServer();
             if(server is null || lastState is null) throw new IOException("Server failed to start or poll.");
+            timer.Stop(); // Keep the isolated lifecycle proof deterministic; all polls below are explicit.
+            var qr = await Api("/api/admin/qr?address=127.0.0.1");
+            var code = qr.GetProperty("link").GetString()!.Split("#pair=")[1];
+            string? session = null;
+            async Task<JsonElement> PhoneApi(string path,HttpMethod method,object? body = null)
+            {
+                using var request = new HttpRequestMessage(method,baseUrl + path);
+                if(session is not null) request.Headers.Add("X-LanDrop-Session",session);
+                if(body is not null) request.Content = JsonContent.Create(body);
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var response = await http.SendAsync(request,deadline.Token);
+                response.EnsureSuccessStatusCode();
+                return JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync(deadline.Token));
+            }
+            var paired = await PhoneApi("/api/pair",HttpMethod.Post,new { code, name = "Desktop lifecycle phone" });
+            session = paired.GetProperty("token").GetString();
+            await Poll();
+            var device = lastState!.Devices.Single(d => d.Name == "Desktop lifecycle phone");
+            await Api($"/api/admin/devices/{device.Id}/approve",HttpMethod.Post);
+            foreach(var action in new[] { "approve", "reject" })
+            {
+                var name = "lifecycle-" + action + ".txt";
+                var offer = await PhoneApi("/api/offers",HttpMethod.Post,new { name, size = 123 });
+                var id = offer.GetProperty("id").GetString()!;
+                await Poll();
+                if(lastState?.Offers?.SingleOrDefault(o => o.Id == id) is not { } shown || shown.DeviceName != device.Name || shown.Name != name || shown.Size != 123)
+                    throw new IOException("Offer state did not reach desktop.");
+                var labels = OffersPanel.Children.OfType<DockPanel>().SelectMany(row => row.Children.OfType<TextBlock>()).Select(label => label.Text);
+                if(!labels.Any(label => label.Contains(device.Name,StringComparison.Ordinal) && label.Contains(name,StringComparison.Ordinal) && label.Contains("123",StringComparison.Ordinal)))
+                    throw new IOException("Offer did not render in desktop.");
+                await DecideOffer(id,action); // Same action and refresh path as the visible buttons.
+                var decided = await PhoneApi("/api/offers/" + id,HttpMethod.Get);
+                if(decided.GetProperty("status").GetString() != (action == "approve" ? "approved" : "rejected") || lastState?.Offers?.Any(o => o.Id == id) == true)
+                    throw new IOException("Desktop offer action did not complete.");
+            }
             var folder = Path.Combine(dataDirectory, "Inbox");
             Directory.CreateDirectory(folder);
             await Api("/api/admin/folder", HttpMethod.Post, new { path = folder });
@@ -169,11 +208,25 @@ public partial class MainWindow : Window
             if(lastState?.Inbox != folder) throw new IOException("Folder roundtrip failed.");
             await StopServer();
             if(server is not null || lastStopExitCode != 0) throw new IOException("Server did not stop gracefully.");
-            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, ServerExitCode = lastStopExitCode }));
+            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, ServerExitCode = lastStopExitCode }));
             result = 0;
         }
         catch(Exception) { await StopServer(); }
         finally { closing = true; tray.Dispose(); http.Dispose(); Application.Current.Shutdown(result); }
+    }
+    private string ResponseError(string text,int status)
+    {
+        try
+        {
+            using var body = JsonDocument.Parse(text);
+            if(body.RootElement.TryGetProperty("code",out var code) && code.ValueKind == JsonValueKind.String)
+            {
+                var key = "Error_" + code.GetString();
+                if(english.ContainsKey(key)) return T(key);
+            }
+        }
+        catch(JsonException) { }
+        return T("OperationFailed") + " (" + status + ")";
     }
     private async Task<JsonElement> Api(string path, HttpMethod? method = null, object? body = null, CancellationToken token = default)
     {
@@ -187,10 +240,31 @@ public partial class MainWindow : Window
         {
             using var response = await http.SendAsync(request,deadline.Token);
             var text = await response.Content.ReadAsStringAsync(deadline.Token);
-            if(!response.IsSuccessStatusCode) throw new IOException(T("OperationFailed") + " (" + (int)response.StatusCode + ")");
+            if(!response.IsSuccessStatusCode) throw new IOException(ResponseError(text,(int)response.StatusCode));
             return string.IsNullOrWhiteSpace(text) ? default : JsonSerializer.Deserialize<JsonElement>(text);
         }
         catch(OperationCanceledException ex) when(!token.IsCancellationRequested) { throw new IOException(T("OperationFailed"),ex); }
+    }
+    private async Task CheckSharingNetwork()
+    {
+        var owned = server;
+        var address = settings.Address;
+        var currentGeneration = generation;
+        if(checkingNetwork || stopping || owned is null || address == "127.0.0.1") return;
+        checkingNetwork = true;
+        try
+        {
+            NetworkChoice[] interfaces;
+            try { interfaces = await Task.Run(NetworkDiagnostics.Interfaces); }
+            catch(Exception) { interfaces = []; }
+            if(currentGeneration != generation || !ReferenceEquals(server, owned) || stopping) return;
+            var choice = interfaces.FirstOrDefault(n => n.Address == address);
+            if(NetworkDiagnostics.CanContinueSharing(choice?.Profile)) return;
+            var reason = T(choice is null ? "NetworkUnavailableStopped" : "NetworkUnsafeStopped");
+            await StopServer();
+            if(server is null) Status.Text = reason;
+        }
+        finally { checkingNetwork = false; }
     }
     private async Task Poll()
     {
@@ -226,6 +300,27 @@ public partial class MainWindow : Window
             if(!device.Approved) { var reject = new Button { Content = T("Reject") }; DockPanel.SetDock(reject,Dock.Right); reject.Click += async (_,_) => { try { await Api($"/api/admin/devices/{device.Id}/revoke",HttpMethod.Post); await Poll(); } catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; } }; panel.Children.Add(reject); }
             panel.Children.Add(new TextBlock { Text = device.Name + " · " + T(device.Approved ? "Approved" : "Pending"), VerticalAlignment = VerticalAlignment.Center }); DevicesPanel.Children.Add(panel);
         }
+        OffersPanel.Children.Clear();
+        var offers = state.Offers ?? [];
+        if(offers.Length == 0) OffersPanel.Children.Add(new TextBlock { Text = T("NoOffers") });
+        foreach(var offer in offers)
+        {
+            var row = new DockPanel();
+            var accept = new Button { Content = T("AcceptFile") };
+            var reject = new Button { Content = T("Reject") };
+            DockPanel.SetDock(accept,Dock.Right); DockPanel.SetDock(reject,Dock.Right);
+            async Task Decide(string action)
+            {
+                accept.IsEnabled = reject.IsEnabled = false;
+                try { await DecideOffer(offer.Id,action); }
+                catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; accept.IsEnabled = reject.IsEnabled = server is not null; }
+            }
+            accept.Click += async (_,_) => await Decide("approve");
+            reject.Click += async (_,_) => await Decide("reject");
+            row.Children.Add(reject); row.Children.Add(accept);
+            row.Children.Add(new TextBlock { Text = $"{offer.DeviceName} · {offer.Name} · {offer.Size:N0} B", VerticalAlignment = VerticalAlignment.Center });
+            OffersPanel.Children.Add(row);
+        }
         FilesPanel.Children.Clear();
         if(state.Files.Length == 0) FilesPanel.Children.Add(new TextBlock { Text = T("NoFiles") });
         foreach(var f in state.Files)
@@ -234,6 +329,11 @@ public partial class MainWindow : Window
             remove.Click += async (_,_) => { try { await Api("/api/admin/files/"+f.Id,HttpMethod.Delete); await Poll(); } catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; } };
             row.Children.Add(remove); row.Children.Add(new TextBlock { Text = $"{f.Name} · {f.Size:N0} B · {T(f.Direction == "outbound" ? "Ready" : "Received")}",VerticalAlignment = VerticalAlignment.Center }); FilesPanel.Children.Add(row);
         }
+    }
+    private async Task DecideOffer(string id,string action)
+    {
+        await Api($"/api/admin/offers/{Uri.EscapeDataString(id)}/{action}",HttpMethod.Post);
+        await Poll();
     }
     private async Task RefreshQr()
     {
@@ -283,7 +383,7 @@ public partial class MainWindow : Window
                 });
                 request.Content = new StreamContent(progress); request.Content.Headers.ContentLength = info.Length;
                 using var response = await http.SendAsync(request,transfer.Token);
-                if(!response.IsSuccessStatusCode) throw new IOException(T("OperationFailed")+" ("+(int)response.StatusCode+")");
+                if(!response.IsSuccessStatusCode) throw new IOException(ResponseError(await response.Content.ReadAsStringAsync(transfer.Token),(int)response.StatusCode));
             }
             Status.Text = T("ReadyForPhone"); await Poll();
         }
@@ -297,7 +397,7 @@ public partial class MainWindow : Window
     private Task StopServer() => stopTask is { IsCompleted: false } ? stopTask : stopTask = StopServerCore();
     private async Task StopServerCore()
     {
-        stopping = true; generation++; StartButton.IsEnabled = StopButton.IsEnabled = false; timer.Stop(); transfer?.Cancel(); pairLink = null; QrImage.Source = null; LinkText.Text = "";
+        stopping = true; generation++; StartButton.IsEnabled = StopButton.IsEnabled = false; timer.Stop(); networkTimer.Stop(); transfer?.Cancel(); pairLink = null; QrImage.Source = null; LinkText.Text = "";
         var owned = server; server = null;
         if(owned is not null)
         {
@@ -306,7 +406,7 @@ public partial class MainWindow : Window
             lastStopExitCode = owned.ExitCode;
             owned.Dispose();
         }
-        baseUrl = adminKey = null; lastState = null; DevicesPanel.Children.Clear(); FilesPanel.Children.Clear(); Recipient.ItemsSource = null;
+        baseUrl = adminKey = null; lastState = null; DevicesPanel.Children.Clear(); OffersPanel.Children.Clear(); FilesPanel.Children.Clear(); Recipient.ItemsSource = null;
         StartButton.IsEnabled = Network.IsEnabled = true; StopButton.IsEnabled = ChooseFolderButton.IsEnabled = OpenFolderButton.IsEnabled = NewQrButton.IsEnabled = SendButton.IsEnabled = CopyLinkButton.IsEnabled = false;
         Status.Text = T("Stopped"); stopping = false;
     }
@@ -321,7 +421,8 @@ record LanguageChoice(string Code,string Name);
 record DesktopSettings(string Language = "en",string? Address = null);
 record DeviceInfo(string Id,string Name,bool Approved);
 record FileInfoDto(string Id,string Name,long Size,string Direction);
-record ServerState(string Inbox,DeviceInfo[] Devices,FileInfoDto[] Files);
+record OfferInfo(string Id,string Name,long Size,string DeviceId,string DeviceName,string Status,DateTimeOffset Expires);
+record ServerState(string Inbox,DeviceInfo[] Devices,FileInfoDto[] Files,OfferInfo[]? Offers = null);
 
 sealed class ProgressReadStream(Stream inner,Action<long> progress) : Stream
 {

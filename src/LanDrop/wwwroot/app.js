@@ -5,13 +5,23 @@ let admin = sessionStorage.getItem('landrop-admin');
 let token = sessionStorage.getItem('landrop-session');
 let pairCode = fragment.get('pair');
 history.replaceState(null, '', location.pathname);
-let busy = false, cancelled = false, current = null, qrUrl = null, qrAddress = null, lastState = null;
+let busy = false, cancelled = false, current = null, offerCancellation = null, qrUrl = null, qrAddress = null, lastState = null;
 const headers = () => admin ? {'X-LanDrop-Admin': admin} : {'X-LanDrop-Session': token || ''};
 function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
 async function api(path, options = {}) {
-  const response = await fetch(path, {...options, headers: {...headers(), ...options.headers}});
-  if (!response.ok) { let body; try { body = await response.json(); } catch {} throw new Error(errorMessage(body, response.status)); }
-  const text = await response.text(); return text ? JSON.parse(text) : null;
+  const deadline = new AbortController();
+  const cancel = () => deadline.abort();
+  options.signal?.addEventListener('abort', cancel, {once:true});
+  if(options.signal?.aborted) cancel();
+  const timer = setTimeout(cancel, 15000);
+  try {
+    const response = await fetch(path, {...options, signal:deadline.signal, headers: {...headers(), ...options.headers}});
+    if (!response.ok) { let body; try { body = await response.json(); } catch {} throw new Error(errorMessage(body, response.status)); }
+    const text = await response.text(); return text ? JSON.parse(text) : null;
+  } catch(error) {
+    if(error.name === 'AbortError' && !options.signal?.aborted) throw new Error(t('networkError'));
+    throw error;
+  } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', cancel); }
 }
 const post = (path, data) => api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data || {})});
 function size(bytes) { const units = ['B','KB','MB','GB']; let i = 0; while(bytes >= 1024 && i < 3) { bytes /= 1024; i++; } return bytes.toLocaleString(locale(), {minimumFractionDigits:i ? 1 : 0, maximumFractionDigits:i ? 1 : 0}) + ' ' + units[i]; }
@@ -53,6 +63,15 @@ async function refresh(cachedState = null) {
     if(approvedDevices.some(d=>d.id === selectedRecipient)) $('recipient').value = selectedRecipient;
     else if(approvedDevices.length === 1) $('recipient').value = approvedDevices[0].id;
     renderFiles(data.files, true);
+    $('offer-section').hidden = false;
+    $('offers').replaceChildren();
+    if(!data.offers?.length) $('offers').textContent = t('noOffers');
+    for(const offer of data.offers || []) {
+      const el = row(offer.name, offer.deviceName + ' · ' + size(offer.size));
+      el.append(button(t('acceptFile'),()=>post('/api/admin/offers/'+offer.id+'/approve')),
+        button(t('reject'),()=>post('/api/admin/offers/'+offer.id+'/reject')));
+      $('offers').append(el);
+    }
   } else if (token) {
     const data = cachedState || await api('/api/state');
     lastState = data;
@@ -65,7 +84,7 @@ function renderFiles(files, local) {
   if (!files.length) $('files').textContent = local ? t('noTransfers') : t('noFiles');
   for (const f of files) { const el = row(f.name, size(f.size) + (local ? (f.direction === 'outbound' ? t('preparedSuffix') : t('receivedSuffix')) : '')); if (local) el.append(button(f.direction === 'outbound' ? t('unshare') : t('hide'),()=>api('/api/admin/files/'+f.id,{method:'DELETE'}))); else { const a = document.createElement('a'); a.href = '/download/'+f.id; a.textContent = t('download'); a.setAttribute('download',f.name); el.append(a); } $('files').append(el); }
 }
-function upload(file, index, count, recipientId) {
+function upload(file, index, count, recipientId, offerId) {
   return new Promise((resolve,reject) => {
     const meter = new TransferMeter(file.size);
     let lastRender = -Infinity;
@@ -83,7 +102,7 @@ function upload(file, index, count, recipientId) {
       $('progress-text').textContent = index+'/'+count+' · '+file.name+' · '+Math.round(sample.percent)+' % · '+detail;
     };
     const xhr = current = new XMLHttpRequest();
-    xhr.open('PUT','/api/files?name='+encodeURIComponent(file.name)+(admin ? '&recipient='+encodeURIComponent(recipientId) : ''));
+    xhr.open('PUT','/api/files?name='+encodeURIComponent(file.name)+(admin ? '&recipient='+encodeURIComponent(recipientId) : '&offer='+encodeURIComponent(offerId)));
     for(const [k,v] of Object.entries(headers())) xhr.setRequestHeader(k,v);
     xhr.setRequestHeader('Content-Type','application/octet-stream');
     xhr.upload.onprogress = e => { if(e.lengthComputable) renderProgress(e.loaded); };
@@ -106,16 +125,29 @@ async function send(files) {
       if(cancelled) break;
       if(files[i].size > 10*1024**3) throw new Error(t('invalidSize'));
       $('progress').value = 0; $('progress-text').textContent = (i+1)+'/'+files.length+' · '+files[i].name;
-      await upload(files[i],i+1,files.length,recipientId);
+      let offerId;
+      try {
+        if(!admin) {
+          offerCancellation = new AbortController();
+          offerId = await new ReceiveOfferClient(api).approve(files[i], offerCancellation.signal, () => {
+            $('progress-text').textContent = (i+1)+'/'+files.length+' · '+files[i].name+' · '+t('waitingForFileApproval');
+          });
+        }
+        if(cancelled) throw new Error(t('cancelled'));
+        await upload(files[i],i+1,files.length,recipientId,offerId);
+      } finally {
+        offerCancellation = null;
+        if(offerId) await api('/api/offers/'+encodeURIComponent(offerId), {method:'DELETE'}).catch(()=>{});
+      }
       $('history').prepend(row(files[i].name, admin ? t('prepared') : t('saved')));
     }
     if(!cancelled) notice(t(admin ? 'outgoingDone' : 'done'));
     await refresh();
-  } catch(e) { notice(e.message,true); }
+  } catch(e) { notice(e.name === 'AbortError' ? t('cancelled') : e.code ? t(e.code) : e.message,true); }
   finally { current = null; busy = false; $('recipient').disabled = false; $('file-input').disabled = false; $('file-input').value = ''; $('progress-area').hidden = true; }
 }
 $('file-input').onchange = e => send([...e.target.files]);
-$('cancel').onclick = () => { cancelled = true; current?.abort(); };
+$('cancel').onclick = () => { cancelled = true; offerCancellation?.abort(); current?.abort(); };
 $('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('drag'); };
 $('drop').ondragleave = () => $('drop').classList.remove('drag');
 $('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('drag'); send([...e.dataTransfer.files]); };

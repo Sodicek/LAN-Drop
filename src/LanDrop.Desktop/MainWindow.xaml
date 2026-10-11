@@ -31,6 +31,7 @@
   </GroupBox>
   <GroupBox x:Name="FolderGroup"><StackPanel><TextBlock x:Name="FolderText"/><WrapPanel><Button x:Name="ChooseFolderButton" Click="ChooseFolder" IsEnabled="False"/><Button x:Name="OpenFolderButton" Click="OpenFolder" IsEnabled="False"/></WrapPanel></StackPanel></GroupBox>
   <GroupBox x:Name="DevicesGroup"><StackPanel x:Name="DevicesPanel"/></GroupBox>
+  <GroupBox x:Name="OffersGroup"><StackPanel><TextBlock x:Name="OffersHelp"/><StackPanel x:Name="OffersPanel"/></StackPanel></GroupBox>
   <GroupBox x:Name="SendGroup"><StackPanel>
    <TextBlock x:Name="RecipientLabel"/><ComboBox x:Name="Recipient" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Recipient"/>
    <WrapPanel><Button x:Name="SendButton" Click="SelectFiles" IsEnabled="False"/><Button x:Name="CancelButton" Click="CancelTransfer" IsEnabled="False"/><Button x:Name="HideButton" Click="HideToTray"/></WrapPanel>

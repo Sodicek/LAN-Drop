@@ -51,5 +51,6 @@ static class NetworkDiagnostics
                     profiles.GetValueOrDefault(n.GetIPProperties().GetIPv4Properties()?.Index ?? -1, NetworkProfile.Unknown))))
             .Append(new NetworkChoice("127.0.0.1", "Local test", "AdapterLoopback", NetworkProfile.Loopback)).ToArray();
     }
+    public static bool CanContinueSharing(NetworkProfile? profile) => profile.HasValue && CanShare(profile.Value);
     public static bool CanShare(NetworkProfile profile) => profile is NetworkProfile.Private or NetworkProfile.Domain or NetworkProfile.Loopback;
 }

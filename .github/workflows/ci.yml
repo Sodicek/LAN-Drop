@@ -33,10 +33,13 @@ jobs:
           node --check src/LanDrop/wwwroot/app.js
           node --check src/LanDrop/wwwroot/i18n.js
           node --check src/LanDrop/wwwroot/progress.js
+          node --check src/LanDrop/wwwroot/offers.js
       - name: Check localization coverage
         run: node tests/localization.cjs
       - name: Check progress calculations
         run: node tests/progress.cjs
+      - name: Check phone approval workflow
+        run: node tests/offers.cjs
       - name: Run HTTP integration checks
         run: python tests/integration.py
       - name: Check Windows storage safety

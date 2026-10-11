@@ -10,6 +10,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 
 - Native Windows WPF window, network interface selection and explicit start/stop sharing.
 - Locally generated QR code, approval on the PC, short-lived pairing and revocable sessions.
+- Per-file incoming offers: check the phone, name and size on the PC, then accept or reject before upload.
 - Individual recipients: each phone can list/download only files addressed to it.
 - Multiple files uploaded sequentially, progress, speed, time estimates and cancellation; empty files supported.
 - Streaming to disk with duplicate-name protection, Windows filename checks and incomplete-upload cleanup.
@@ -17,7 +18,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 - English and Czech on Windows and the web; automatic language option and English fallback.
 - Default loopback-only server; optional single selected IPv4 interface for phone access.
 - Upload concurrency and per-run byte/file limits.
-- Desktop network diagnostics and a start-time gate for private/domain profiles.
+- Desktop network diagnostics, a start-time private/domain profile gate and periodic monitoring that stops unsafe sharing.
 - Free-space checks, concurrent disk reservations and path checks that reject reparse points.
 
 ## Run from source
@@ -35,7 +36,7 @@ Or double-click **Start-LAN-Drop.cmd**. It builds the solution and opens the Win
 2. Click **Start sharing**, scan the QR on the phone and enter a device name.
 3. Approve that request on the PC. Generate a new QR to connect another phone.
 4. Choose a recipient before adding files on the PC. On the phone, use **Download**.
-5. Phone uploads are saved to the chosen folder (default: Downloads/LAN-Drop).
+5. On the phone, choose files. Accept each request on the PC to start its upload to the chosen folder (default: Downloads/LAN-Drop). Reject it or cancel on the phone to skip sending. Requests expire after ten minutes.
 6. **Hide to notification area** keeps sharing running; double-click the tray icon to reopen. Closing the window stops sharing.
 
 Safari manages downloaded files; this app does not automatically save images into Photos or claim that a native browser download has been saved successfully. Keep the Safari tab open during uploads.
@@ -80,23 +81,24 @@ python tests/integration.py
 python tests/storage_safety.py
 node tests/localization.cjs
 node tests/progress.cjs
+node tests/offers.cjs
 dotnet run --project tests/NetworkPolicy -c Release
 dotnet run --project src/LanDrop.Desktop -c Release --no-build -- --smoke-test
 python tests/desktop_lifecycle.py
 ```
 
-Tests cover two-device authorization, pairing, recipient isolation, transfers, cookies, ranges, filenames, interrupted uploads, storage safety, language resources, progress calculations, profile policy and the real desktop/server lifecycle. Tests use loopback and do not validate a real iPhone, Wi-Fi or firewall.
+Tests cover two-device authorization, pairing, recipient isolation, receive approval/rejection/cancellation/replay, transfers, cookies, ranges, filenames, interrupted uploads, storage safety, language resources, progress calculations, profile policy and the real desktop/server lifecycle. Tests use loopback and do not validate a real iPhone, Wi-Fi or firewall.
 
 ## Known limitations
 
 - HTTP is not encrypted. Trusted HTTPS in Safari remains an architecture decision and a stable-release gate.
-- No resumable upload, checksum verification, per-file receive approval or persistent transfer history yet.
-- Every approved phone may upload to the configured inbox; outgoing files are isolated by recipient.
+- No resumable upload, checksum verification or persistent transfer history yet.
+- Incoming offers are per file, valid for ten minutes and bound to the device, name and declared size. They do not verify file contents. An attempted upload consumes approval even if it fails; retry with a new request.
 - The 10 GB per-file limit is a configured ceiling, not a benchmarked guarantee.
 - Byte quota is cumulative for the server run; deleting an outgoing share releases its bytes. Hiding incoming entries preserves their files and quota. Restart resets the quota; this is not total-disk accounting.
 - Inactive owned outboxes are cleaned after a crash. Unmarked folders and completed inbox files are preserved; incomplete inbox files may remain.
 - Path checks reject reparse points but are not atomic protection against a hostile local process. Other disk consumers may fill free space between checks.
-- Desktop checks network profiles before starting; it does not continuously monitor profile changes or prove phone reachability. Automatic firewall setup, secure updates and an installer are pending.
+- Desktop checks network profiles before starting and every fifteen seconds while sharing. A missing address or public/unknown profile stops the server; detection can be delayed and does not prove phone reachability. The browser-only server does not monitor profiles. Automatic firewall setup, secure updates and an installer are pending.
 - Native client currently talks to a child server through authenticated loopback HTTP. The future Core/Transport split is not yet complete.
 
 See [product design](PRODUCT-DESIGN.md), [roadmap](ToDo.md), [changes](CHANGELOG.md) and [security policy](SECURITY.md). [Archived Czech design](docs/cs/PRODUCT-DESIGN.md) records the original proposal and may describe older behavior.
