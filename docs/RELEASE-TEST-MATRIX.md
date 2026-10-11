@@ -1,12 +1,12 @@
 # LAN Drop 0.2.0 release test matrix
 
-0.2.0 is a release candidate until the physical-device and clean-Windows checks below are recorded and authenticated secure transport is implemented and verified. A successful browser emulation run does not verify Android Chrome on hardware or iPhone Safari. New grouped-consent, retained-selection, mobile-emulation and native-lifecycle checks passed on the Windows development host on 2026-10-11. The repository's Actions run records the complete CI result for the corresponding commit.
+0.2.0 is a release candidate until the physical-device and clean-Windows checks below are recorded and authenticated secure transport is implemented and verified. A successful browser emulation run does not verify Android Chrome on hardware or iPhone Safari. Grouped-consent, retained-selection, mobile-emulation and native-lifecycle checks ran on the Windows development host on 2026-10-11. The [expanded mobile simulation report](MOBILE-SIMULATION.md) records Chromium and WebKit results, including the Windows WebKit Unicode download-name limitation. The repository's Actions run records the complete CI result for the corresponding commit.
 
 | Check | Environment | Evidence / status |
 | --- | --- | --- |
 | Pairing, permissions, checksums, recipient isolation, quota and replay | Real local HTTP server | Automated: `python tests/integration.py` |
 | Grouped consent, twenty files, atomic validation, retry and receipt isolation | Real local HTTP server | Automated: `python tests/batches.py` |
-| Grouped selection, cancel, failed-upload retry without reselection, download | Chromium with Pixel 7 emulation | Automated: `node tests/mobile_browser.cjs`; not physical Android |
+| Grouped selection, cancel, offline retry without reselection, download, rotation and revocation | Chromium with Pixel 7 and Windows WebKit with iPhone 13 profiles | Automated: `node tests/mobile_browser.cjs`; core scenarios passed, Windows WebKit uses ASCII download-name fallback; not physical Android/iOS |
 | Native window and child-server startup/shutdown | Windows development host and CI | Automated desktop smoke and lifecycle checks |
 | Self-contained portable package lifecycle | Windows development host with SDK/runtime discovery removed from PATH and DOTNET_ROOT | Passed: `python tests/desktop_lifecycle.py --executable publish/LAN-Drop-0.2.0-rc.1-win-x64/LanDrop.Desktop.exe --without-sdk`; does not replace a clean-machine test |
 | Safe storage paths, disk shortage, stale outbox ownership | Windows development host and CI | Automated: `python tests/storage_safety.py` |

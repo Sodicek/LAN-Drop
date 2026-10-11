@@ -102,7 +102,7 @@ Tests cover two-device authorization, pairing, recipient isolation, receive appr
 
 Browser hash assets are already bundled for normal source/portable use; no internet request is made during hashing. To regenerate them, use Node 24 and `npm ci --ignore-scripts`, then `npm run build:hash`. See [integrity protocol](docs/INTEGRITY.md) and [third-party notices](THIRD-PARTY-NOTICES.md).
 
-For browser checks, run `npm ci --ignore-scripts`, `npx playwright install chromium`, then `node tests/mobile_browser.cjs` after building the server. These exercise Chromium with an Android viewport/user agent, real worker uploads, PC acceptance and native browser downloads against an isolated local server. They do not exercise Android's actual file picker or phone hardware.
+For mobile browser checks, run `npm ci --ignore-scripts`, `npx playwright install chromium webkit`, then `node tests/mobile_browser.cjs` after building the server. This runs Chromium with a Pixel 7 profile and WebKit with an iPhone 13 profile against isolated local servers. Use `node tests/mobile_browser.cjs android` or `node tests/mobile_browser.cjs iphone` to select one profile. See [mobile simulation results and limitations](docs/MOBILE-SIMULATION.md). These checks exercise real workers, consent, saved-file receipts, offline retry and browser downloads; they do not exercise phone hardware or either operating system's file picker.
 
 ## Known limitations
 
