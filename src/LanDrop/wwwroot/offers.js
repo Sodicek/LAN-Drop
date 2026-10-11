@@ -36,3 +36,33 @@ class ReceiveOfferClient {
     }
   }
 }
+class BatchOfferClient {
+  constructor(request, delay = ReceiveOfferClient.delay) { this.request = request; this.delay = delay; }
+  async approve(files, signal, onWaiting) {
+    let batch, accepted = false;
+    try {
+      if(signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+      batch = await this.request('/api/offer-batches', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body:JSON.stringify({files:files.map(file => ({name:file.name,size:file.size}))}), signal});
+      onWaiting();
+      let status = batch.status;
+      while(true) {
+        if(signal.aborted) throw new DOMException('Cancelled', 'AbortError');
+        if(status === 'approved') {
+          if(!Array.isArray(batch.offers) || batch.offers.length !== files.length || batch.offers.some((offer,i) =>
+            !offer.id || offer.name !== files[i].name || offer.size !== files[i].size)) throw new Error('offer_mismatch');
+          accepted = true; return batch;
+        }
+        if(status !== 'pending') {
+          const error = new Error('Batch ' + status);
+          error.code = status === 'rejected' ? 'offer_rejected' : status === 'expired' ? 'offer_expired' : 'offer_not_approved';
+          throw error;
+        }
+        await this.delay(1000, signal);
+        status = (await this.request('/api/offer-batches/'+encodeURIComponent(batch.id), {signal})).status;
+      }
+    } finally {
+      if(batch?.id && !accepted) await this.request('/api/offer-batches/'+encodeURIComponent(batch.id), {method:'DELETE'}).catch(()=>{});
+    }
+  }
+}

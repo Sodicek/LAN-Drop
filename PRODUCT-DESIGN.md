@@ -30,7 +30,7 @@ The project owner approves product direction. Release scope cannot waive securit
 
 ## User flows
 
-**Phone to PC:** select folder on PC → scan QR → approve phone → prepare checksum and offer each file → accept on PC → stream, read back and verify → show completed files and Open folder. Current preview enforces per-file approval and checks the saved PC copy. Independently verified phone downloads, resumable transfers and batch approval are future work.
+**Phone to PC:** select folder on PC → scan QR → approve phone → offer the selected files with names and total size → accept the batch on PC → prepare checksums, stream, read back and verify → show completed files and Open folder. The current candidate supports grouped approval, current-run transfer states and retry of unfinished selections with fresh consent. Independently verified phone downloads and resumable transfers remain future work.
 
 **PC to phone:** add/drop files → select recipient → offer → phone downloads. Other phones must not see the offer. Distinguish available, server transfer complete and recipient confirmation. Safari-native download does not prove local file persistence.
 

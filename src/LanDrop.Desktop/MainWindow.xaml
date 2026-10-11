@@ -34,10 +34,12 @@
   <GroupBox x:Name="OffersGroup"><StackPanel><TextBlock x:Name="OffersHelp"/><StackPanel x:Name="OffersPanel"/></StackPanel></GroupBox>
   <GroupBox x:Name="SendGroup"><StackPanel>
    <TextBlock x:Name="RecipientLabel"/><ComboBox x:Name="Recipient" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Recipient"/>
-   <WrapPanel><Button x:Name="SendButton" Click="SelectFiles" IsEnabled="False"/><Button x:Name="CancelButton" Click="CancelTransfer" IsEnabled="False"/><Button x:Name="HideButton" Click="HideToTray"/></WrapPanel>
+   <WrapPanel><Button x:Name="SendButton" Click="SelectFiles" IsEnabled="False"/><Button x:Name="RetryButton" Click="RetryFiles" IsEnabled="False"/><Button x:Name="ClearRetryButton" Click="ClearRetry" IsEnabled="False"/><Button x:Name="CancelButton" Click="CancelTransfer" IsEnabled="False"/><Button x:Name="HideButton" Click="HideToTray"/></WrapPanel>
+   <TextBlock x:Name="RetryHelp" Foreground="#D6B86A"/>
    <ProgressBar x:Name="UploadProgress" Height="12" Maximum="100"/><TextBlock x:Name="ProgressText" Margin="0,10,0,0"/>
   </StackPanel></GroupBox>
   <GroupBox x:Name="FilesGroup"><StackPanel x:Name="FilesPanel"/></GroupBox>
+  <GroupBox x:Name="TransfersGroup"><StackPanel><TextBlock x:Name="TransfersHelp"/><Button x:Name="TransferFolderButton" Click="OpenFolder" IsEnabled="False" HorizontalAlignment="Left"/><StackPanel x:Name="TransfersPanel"/></StackPanel></GroupBox>
   <TextBlock x:Name="VersionText" Foreground="#A5B1B5"/>
  </StackPanel></ScrollViewer>
 </Window>

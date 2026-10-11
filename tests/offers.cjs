@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const context = {DOMException, setTimeout, clearTimeout};
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/LanDrop/wwwroot/offers.js'), 'utf8') + '\nglobalThis.Client=ReceiveOfferClient;', context);
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/LanDrop/wwwroot/offers.js'), 'utf8') + '\nglobalThis.Client=ReceiveOfferClient;globalThis.BatchClient=BatchOfferClient;', context);
 const Client = context.Client;
 const file = {name:'photo.jpg', size:123};
 
@@ -71,6 +71,41 @@ async function run() {
   await assert.rejects(delay, error => error.name === 'AbortError');
   await assert.rejects(Client.delay(10000, before.signal), error => error.name === 'AbortError');
   await Client.delay(1, new AbortController().signal);
+  const selection = [file,{name:'second.jpg',size:456}];
+  const batchCalls = [];
+  const batchClient = new context.BatchClient(async(url,options={}) => {
+    batchCalls.push({url,...options});
+    return options.method === 'POST' ? {id:'batch id',status:'pending',offers:selection.map((f,i)=>({id:String(i),...f}))} : {status:'approved'};
+  }, async()=>{});
+  const acceptedBatch = await batchClient.approve(selection,new AbortController().signal,()=>{});
+  assert.equal(acceptedBatch.offers.length,2);
+  assert.deepEqual(JSON.parse(batchCalls[0].body),{files:selection});
+  assert.equal(batchCalls[1].url,'/api/offer-batches/batch%20id');
+  assert.equal(batchCalls.length,2,'One metadata request authorizes the entire selection');
+  for(const status of ['rejected','expired','consumed']) {
+    const calls=[];
+    const client = new context.BatchClient(async(url,options={})=>{
+      calls.push(options.method||'GET');
+      return options.method==='POST'?{id:'batch',status:'pending'}:{status};
+    },async()=>{});
+    await assert.rejects(client.approve(selection,new AbortController().signal,()=>{}));
+    assert.deepEqual(calls,['POST','GET','DELETE']);
+  }
+  const batchAbort = new AbortController(), abortedCalls=[];
+  const abortedBatch = new context.BatchClient(async(url,options={})=>{
+    abortedCalls.push(options.method||'GET');
+    if(options.method==='POST') return {id:'aborted',status:'pending'};
+    batchAbort.abort();return {status:'approved'};
+  },async()=>{});
+  await assert.rejects(abortedBatch.approve(selection,batchAbort.signal,()=>{}),error=>error.name==='AbortError');
+  assert.equal(abortedCalls.at(-1),'DELETE','Late batch approval cannot override cancellation');
+  let mismatchCleanup=false;
+  const mismatchedBatch = new context.BatchClient(async(url,options={})=>{
+    if(options.method==='DELETE') { mismatchCleanup=true;return; }
+    return {id:'mismatch',status:'approved',offers:[{id:'1',name:'other.jpg',size:123}]};
+  },async()=>{});
+  await assert.rejects(mismatchedBatch.approve(selection,new AbortController().signal,()=>{}),/offer_mismatch/);
+  assert.equal(mismatchCleanup,true,'Mismatched consent is canceled before any file body');
   console.log('PASS: metadata-only offers, approval polling, rejection/expiry, cancellation races, offline cleanup, abortable timers.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

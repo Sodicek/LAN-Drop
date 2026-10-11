@@ -22,8 +22,11 @@ parity(context.catalog.en, context.catalog.cs, 'Web');
 for (const match of read('src/LanDrop/wwwroot/index.html').matchAll(/data-i18n="([^"]+)"/g)) {
   assert.ok(context.catalog.en[match[1]], `HTML translation key: ${match[1]}`);
 }
-for (const match of read('src/LanDrop/wwwroot/app.js').matchAll(/\bt\('([^']+)'/g)) {
+for (const match of read('src/LanDrop/wwwroot/app.js').matchAll(/\bt\('([^']+)'(?!\s*\+)/g)) {
   assert.ok(context.catalog.en[match[1]], `JavaScript translation key: ${match[1]}`);
+}
+for(const state of ['queued','preparing','waiting','transferring','verifying','completed','failed','cancelled','pending','approved','rejected','expired']) {
+  assert.ok(context.catalog.en['state_'+state] && context.catalog.cs['state_'+state], `Dynamic transfer-state translation: ${state}`);
 }
 for (const match of read('src/LanDrop/Program.cs').matchAll(/Error\("([^"]+)"/g)) {
   assert.ok(context.catalog.en[match[1]] && context.catalog.cs[match[1]], `Server error translation: ${match[1]}`);

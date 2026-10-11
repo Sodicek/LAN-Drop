@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-alpha.5**. An alpha number does not mean every release gate has passed.
+Current build: **0.2.0-rc.1**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -25,6 +25,8 @@ Current build: **0.2.0-alpha.5**. An alpha number does not mean every release ga
 - [x] Notification-area access; explicit hide vs shutdown.
 - [x] English/Czech/Automatic and translation parity tests.
 - [x] Android/iPhone browser guidance, phone override and upload capability checks.
+- [x] Current-session transfer activity and manual retry of unfinished selections.
+- [x] Connection recovery help for firewall, sleep and address changes.
 - [x] Portable preview packaging script and Windows CI.
 - [ ] Desktop interaction tests on a clean Windows machine.
 - [x] Better server-start diagnosis and network profile information.
@@ -43,7 +45,7 @@ Current build: **0.2.0-alpha.5**. An alpha number does not mean every release ga
 
 ## 0.4.0 — offers and secure transport
 - [x] Per-file receive offers with explicit approval, rejection and cancellation.
-- [ ] Batch offers for selecting many photos with one approval.
+- [x] Batch offers for selecting many photos with one approval.
 - [ ] Authenticated secure transport proven in Safari or revised native iOS scope.
 - [ ] Manual text/link sharing.
 - [ ] Safe image previews and optional ZIP download after device tests.
@@ -52,6 +54,7 @@ Current build: **0.2.0-alpha.5**. An alpha number does not mean every release ga
 - [ ] Installer and code signing.
 - [ ] Diagnostic export with redaction.
 - [ ] Clean-machine portable/install/upgrade tests.
+- [x] Portable ZIP/checksum packaging and a physical release-test matrix.
 - [ ] Real Android/iOS/network compatibility matrix.
 
 ## 1.0.0 — stable

@@ -23,6 +23,8 @@ var gate = new object();
 var sessions = new ConcurrentDictionary<string, Device>();
 var files = new ConcurrentDictionary<string, SharedFile>();
 var offers = new Dictionary<string, ReceiveOffer>(); // All access is protected by gate.
+var batches = new Dictionary<string, ReceiveBatch>(); // Protected by gate.
+var transfers = new Dictionary<string, TransferEntry>(); // Bounded, current sharing run only.
 var slots = new SemaphoreSlim(Math.Max(1, builder.Configuration.GetValue("MaxConcurrentUploads", 3)));
 var maxStoredBytes = builder.Configuration.GetValue<long>("MaxStoredBytes", 20L * 1024 * 1024 * 1024);
 long reservedBytes = 0;
@@ -55,8 +57,32 @@ void PruneOffers()
     foreach (var entry in offers.ToArray())
         if (entry.Value.Status is "pending" or "approved" && (entry.Value.Expires <= now || !sessions.Values.Any(d => d.Id == entry.Value.DeviceId && d.Approved && d.Expires > now && !d.Cancellation.IsCancellationRequested)))
             offers[entry.Key] = entry.Value with { Status = "expired" };
-    var terminal = offers.Values.Where(o => o.Status is not "pending" and not "approved").OrderByDescending(o => o.Expires).Skip(128).ToArray();
-    foreach (var old in terminal) offers.Remove(old.Id);
+    foreach (var batch in batches.Values.OrderByDescending(b => b.Created).Where(b => BatchStatus(b) is not "pending" and not "approved").Skip(128).ToArray())
+        RemoveBatch(batch);
+    // Keep complete batch metadata together, without orphaning offers or unbounded history.
+    foreach (var batch in batches.Values.OrderBy(b => b.Created).Where(b => BatchStatus(b) is not "pending" and not "approved").ToArray())
+        if (offers.Count > 1000) RemoveBatch(batch);
+    foreach (var old in offers.Values.Where(o => o.BatchId is null && o.Status is not "pending" and not "approved").OrderByDescending(o => o.Expires).Skip(128).ToArray()) offers.Remove(old.Id);
+}
+void RemoveBatch(ReceiveBatch batch) { batches.Remove(batch.Id); foreach (var id in batch.OfferIds) offers.Remove(id); }
+string BatchStatus(ReceiveBatch batch)
+{
+    var entries = batch.OfferIds.Select(id => offers[id]).ToArray();
+    if (entries.Any(o => o.Status == "pending")) return "pending";
+    if (entries.Any(o => o.Status == "approved")) return "approved";
+    if (entries.Any(o => o.Status == "expired")) return "expired";
+    if (entries.Any(o => o.Status == "rejected")) return "rejected";
+    return "consumed";
+}
+object BatchView(ReceiveBatch batch) => new { batch.Id, status = BatchStatus(batch), expires = batch.OfferIds.Max(id => offers[id].Expires), offers = batch.OfferIds.Select(id => { var o = offers[id]; return new { o.Id, o.Name, o.Size, o.Status, o.Expires }; }).ToArray() };
+void Track(TransferEntry entry)
+{
+    lock (gate)
+    {
+        transfers[entry.Id] = entry;
+        foreach (var old in transfers.Values.Where(t => t.Status is "completed" or "failed" or "cancelled").OrderByDescending(t => t.Updated).Skip(Math.Max(0, 200 - transfers.Values.Count(t => t.Status is "transferring" or "verifying"))).ToArray()) transfers.Remove(old.Id);
+    }
+
 }
 app.Use(async (c, next) =>
 {
@@ -94,7 +120,7 @@ app.MapGet("/api/admin", (HttpContext c) =>
     lock (gate)
     {
         PruneOffers();
-        return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId, f.Sha256, verified = true }).ToArray(), offers = offers.Values.Where(o => o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray() });
+        return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId, f.Sha256, verified = true }).ToArray(), offers = offers.Values.Where(o => o.BatchId is null && o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray(), batches = batches.Values.Where(b => BatchStatus(b) == "pending").Select(b => new { b.Id, b.DeviceId, b.DeviceName, totalSize = b.OfferIds.Sum(id => offers[id].Size), expires = b.OfferIds.Max(id => offers[id].Expires), files = b.OfferIds.Select(id => { var o = offers[id]; return new { o.Id, o.Name, o.Size }; }).ToArray() }).ToArray(), transfers = transfers.Values.OrderByDescending(t => t.Updated).ToArray() });
     }
 });
 app.MapPost("/api/admin/shutdown", (HttpContext c) => { if (!IsAdmin(c)) return Results.Unauthorized(); c.Response.OnCompleted(() => { app.Lifetime.StopApplication(); return Task.CompletedTask; }); return Results.Ok(); });
@@ -150,6 +176,73 @@ app.MapPost("/api/admin/folder", (HttpContext c, FolderRequest request) =>
     catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return Results.BadRequest(Error("invalid_folder", "Cannot use this folder. Check its path and permissions.")); }
 });
 app.MapGet("/api/state", (HttpContext c) => { var device = GetDevice(c); if (device is null && !IsAdmin(c)) return Results.Unauthorized(); return Results.Ok(new { approved = IsAdmin(c) || device!.Approved, files = (Allowed(c) ? files.Values.Where(f => f.Direction == "outbound" && (IsAdmin(c) || f.RecipientId == device!.Id)) : []).Select(f => new { f.Id, f.Name, f.Size, f.Sha256, verified = true }) }); });
+app.MapGet("/api/transfers", (HttpContext c) =>
+{
+    var device = GetDevice(c); if (device?.Approved != true) return Results.Unauthorized();
+    lock (gate) return Results.Ok(transfers.Values.Where(t => t.DeviceId == device.Id).OrderByDescending(t => t.Updated).ToArray());
+});
+app.MapPost("/api/offer-batches", (HttpContext c, BatchRequest request) =>
+{
+    var device = GetDevice(c); if (device?.Approved != true) return Results.Unauthorized();
+    if (request.Files is null || request.Files.Length is < 1 or > 1000) return Results.BadRequest(Error("invalid_batch", "Choose between 1 and 1000 files."));
+    long total = 0;
+    foreach (var item in request.Files)
+    {
+        if (item is null || !ValidName(item.Name)) return Results.BadRequest(Error("invalid_filename", "Unsupported file name."));
+        if (item.Size < 0) return Results.BadRequest(Error("length_required", "A valid content length is required."));
+        if (item.Size > maxSize) return Results.Json(Error("file_too_large", "The file size limit is exceeded."), statusCode: 413);
+        total = checked(total + item.Size);
+    }
+    lock (gate)
+    {
+        PruneOffers();
+        if (GetDevice(c)?.Approved != true || device.Cancellation.IsCancellationRequested) return Results.Unauthorized();
+        if (total > maxStoredBytes - reservedBytes) return Results.Json(Error("storage_quota", "The storage quota is exceeded."), statusCode: 413);
+        if (request.Files.Length > maxRegisteredFiles - reservedFiles) return Results.Json(Error("file_limit", "The registered file limit is reached."), statusCode: 429);
+        if (batches.Values.Count(b => BatchStatus(b) is "pending" or "approved") >= 32 || request.Files.Length > 1000 - offers.Values.Count(o => o.Status is "pending" or "approved") || request.Files.Length > 2000 - offers.Count) return Results.Json(Error("offer_limit", "Too many files are waiting for approval. Try again later."), statusCode: 429);
+        var id = Secret()[..16]; var expires = DateTimeOffset.UtcNow.AddMinutes(10);
+        var entries = request.Files.Select(f => new ReceiveOffer(Secret()[..16], f.Name, f.Size, device.Id, device.Name, "pending", expires, id)).ToArray();
+        foreach (var entry in entries) offers.Add(entry.Id, entry);
+        var batch = new ReceiveBatch(id, device.Id, device.Name, DateTimeOffset.UtcNow, entries.Select(o => o.Id).ToArray()); batches.Add(id, batch);
+        return Results.Ok(BatchView(batch));
+    }
+});
+app.MapGet("/api/offer-batches/{id}", (HttpContext c, string id) =>
+{
+    var device = GetDevice(c); if (device?.Approved != true) return Results.Unauthorized();
+    lock (gate) { PruneOffers(); return batches.TryGetValue(id, out var batch) && batch.DeviceId == device.Id ? Results.Ok(BatchView(batch)) : Results.NotFound(); }
+});
+app.MapDelete("/api/offer-batches/{id}", (HttpContext c, string id) =>
+{
+    var device = GetDevice(c); if (device?.Approved != true) return Results.Unauthorized();
+    lock (gate)
+    {
+        PruneOffers(); if (!batches.TryGetValue(id, out var batch) || batch.DeviceId != device.Id) return Results.NotFound();
+        foreach (var key in batch.OfferIds) if (offers[key].Status is "pending" or "approved") offers[key] = offers[key] with { Status = "rejected" };
+        PruneOffers(); return Results.Ok();
+    }
+});
+app.MapPost("/api/admin/offer-batches/{id}/{action}", (HttpContext c, string id, string action) =>
+{
+    if (!IsAdmin(c)) return Results.Unauthorized();
+    if (action is not "approve" and not "reject") return Results.BadRequest(Error("invalid_action", "Unknown offer action."));
+    lock (gate)
+    {
+        PruneOffers(); if (!batches.TryGetValue(id, out var batch)) return Results.NotFound();
+        var status = BatchStatus(batch);
+        if (status == "expired") return Results.Json(Error("offer_expired", "The file request has expired."), statusCode: 409);
+        if (batch.OfferIds.Any(key => offers[key].Status is "rejected" or "expired")) return Results.Json(Error("offer_not_approved", "This file request is no longer available. Create a new request for the remaining files."), statusCode: 409);
+        if (status is not "pending" and not "approved") return Results.Json(Error("offer_not_approved", "This file request is no longer available."), statusCode: 409);
+        // Atomic approval covers every file still available in this request. An
+        // already approved request is idempotent and never extends its deadline.
+        foreach (var key in batch.OfferIds)
+        {
+            var entry = offers[key];
+            if (entry.Status is "pending" or "approved") offers[key] = entry with { Status = action == "approve" ? "approved" : "rejected", Expires = action == "approve" && entry.Status == "pending" ? DateTimeOffset.UtcNow.AddHours(2) : entry.Expires };
+        }
+        PruneOffers(); return Results.Ok();
+    }
+});
 app.MapPost("/api/offers", (HttpContext c, OfferRequest request) =>
 {
     var device = GetDevice(c);
@@ -161,7 +254,7 @@ app.MapPost("/api/offers", (HttpContext c, OfferRequest request) =>
     {
         PruneOffers();
         if (GetDevice(c)?.Approved != true || device.Cancellation.IsCancellationRequested) return Results.Unauthorized();
-        if (offers.Values.Count(o => o.Status is "pending" or "approved") >= 32) return Results.Json(Error("offer_limit", "Too many files are waiting for approval. Try again later."), statusCode: 429);
+        if (offers.Values.Count(o => o.BatchId is null && o.Status is "pending" or "approved") >= 32 || offers.Values.Count(o => o.Status is "pending" or "approved") >= 1000 || offers.Count >= 2000) return Results.Json(Error("offer_limit", "Too many files are waiting for approval. Try again later."), statusCode: 429);
         var offer = new ReceiveOffer(Secret()[..16], request.Name, request.Size, device.Id, device.Name, "pending", DateTimeOffset.UtcNow.AddMinutes(10));
         offers.Add(offer.Id, offer);
         return Results.Ok(new { offer.Id, offer.Status, offer.Expires });
@@ -197,6 +290,7 @@ app.MapPost("/api/admin/offers/{id}/{action}", (HttpContext c, string id, string
     {
         PruneOffers();
         if (!offers.TryGetValue(id, out var offer)) return Results.NotFound();
+        if (offer.BatchId is not null) return Results.Json(Error("offer_not_approved", "Approve or reject the entire batch request."), statusCode: 409);
         if (offer.Status == "expired") return Results.Json(Error("offer_expired", "The file offer has expired. Ask the phone to send a new request."), statusCode: 409);
         if (offer.Status is not "pending" and not "approved") return Results.Json(Error("offer_not_approved", "This file offer is no longer available."), statusCode: 409);
         offers[id] = offer with { Status = action == "approve" ? "approved" : "rejected" };
@@ -230,9 +324,16 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
             PruneOffers();
         }
     }
-    if (!await slots.WaitAsync(0, c.RequestAborted)) return Results.Json(Error("upload_limit", "Too many active uploads. Try again shortly."), statusCode: 429);
+    var transfer = new TransferEntry(local ? Secret()[..16] : offer!, name, c.Request.ContentLength.Value, owner.Id, owner.Name, local ? "outbound" : "inbound", "transferring", 0, DateTimeOffset.UtcNow);
+    IResult Failed(string code, string message, int statusCode)
+    {
+        transfer = transfer with { Status = "failed", Updated = DateTimeOffset.UtcNow, ErrorCode = code }; Track(transfer);
+        return Results.Json(Error(code, message), statusCode: statusCode);
+    }
+    if (!await slots.WaitAsync(0, c.RequestAborted)) return Failed("upload_limit", "Too many active uploads. Try again shortly.", 429);
     var length = c.Request.ContentLength.Value;
-    lock (gate) { if (reservedFiles >= maxRegisteredFiles) { slots.Release(); return Results.Json(Error("file_limit", "The registered file limit is reached. Remove shared files or restart sharing."), statusCode: 429); } if (length > maxStoredBytes - reservedBytes) { slots.Release(); return Results.Json(Error("storage_quota", "The storage quota is exceeded."), statusCode: 413); } reservedBytes += length; reservedFiles++; }
+    lock (gate) { if (reservedFiles >= maxRegisteredFiles) { slots.Release(); return Failed("file_limit", "The registered file limit is reached. Remove shared files or restart sharing.", 429); } if (length > maxStoredBytes - reservedBytes) { slots.Release(); return Failed("storage_quota", "The storage quota is exceeded.", 413); } reservedBytes += length; reservedFiles++; }
+    Track(transfer);
     using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, owner.Cancellation.Token);
     var committed = false; string directory; lock (gate) directory = local ? outbox : inbox;
     string? volume = null; long diskRemaining = 0;
@@ -254,15 +355,17 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
         using var incomingHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
         {
-            var buffer = new byte[65536]; long written = 0, nextCheck = 16L * 1024 * 1024;
+            var buffer = new byte[65536]; long written = 0, nextCheck = 16L * 1024 * 1024, nextProgress = 0;
             while (true)
             {
                 var read = await c.Request.Body.ReadAsync(buffer, cancellation.Token);
                 if (read == 0) break;
-                if (read > length - written) return Results.BadRequest(Error("incomplete_transfer", "The transfer length does not match its declared size."));
+                if (read > length - written) return Failed("incomplete_transfer", "The transfer length does not match its declared size.", 400);
                 await output.WriteAsync(buffer.AsMemory(0, read), cancellation.Token);
                 incomingHash.AppendData(buffer, 0, read);
                 written += read;
+                transfer = transfer with { BytesTransferred = written };
+                if (Environment.TickCount64 >= nextProgress) { transfer = transfer with { Updated = DateTimeOffset.UtcNow }; Track(transfer); nextProgress = Environment.TickCount64 + 250; }
                 lock (gate) { diskReservations[volume] -= read; diskRemaining -= read; }
                 if (written >= nextCheck)
                 {
@@ -278,22 +381,30 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
             await output.FlushAsync(cancellation.Token);
         }
         cancellation.Token.ThrowIfCancellationRequested();
-        if (!Allowed(c) || owner.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized();
-        var size = new FileInfo(temp).Length; if (size != length) return Results.BadRequest(Error("incomplete_transfer", "The transfer was not completed."));
-        if (!CryptographicOperations.FixedTimeEquals(incomingHash.GetHashAndReset(), expectedHash)) return Results.Json(Error("checksum_mismatch", "The file checksum does not match. The file was not saved."), statusCode: 422);
+        if (!Allowed(c) || owner.Expires <= DateTimeOffset.UtcNow) return Failed("session_expired", "The device session has expired.", 401);
+        var size = new FileInfo(temp).Length; if (size != length) return Failed("incomplete_transfer", "The transfer was not completed.", 400);
+        if (!CryptographicOperations.FixedTimeEquals(incomingHash.GetHashAndReset(), expectedHash)) return Failed("checksum_mismatch", "The file checksum does not match. The file was not saved.", 422);
+        transfer = transfer with { Status = "verifying", BytesTransferred = size, Updated = DateTimeOffset.UtcNow }; Track(transfer);
         // Read back the closed temporary file before making it available. This checks
         // the stored bytes, but does not guarantee persistence after power loss.
         StorageSafety.ValidateFolder(directory);
         await using (var saved = new FileStream(temp, FileMode.Open, FileAccess.Read, FileShare.None, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan))
-            if (!CryptographicOperations.FixedTimeEquals(await SHA256.HashDataAsync(saved, cancellation.Token), expectedHash)) return Results.Json(Error("checksum_mismatch", "The saved file checksum does not match. The file was not saved."), statusCode: 422);
+            if (!CryptographicOperations.FixedTimeEquals(await SHA256.HashDataAsync(saved, cancellation.Token), expectedHash)) return Failed("checksum_mismatch", "The saved file checksum does not match. The file was not saved.", 422);
         cancellation.Token.ThrowIfCancellationRequested();
-        if (!Allowed(c) || owner.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized();
+        if (!Allowed(c) || owner.Expires <= DateTimeOffset.UtcNow) return Failed("session_expired", "The device session has expired.", 401);
         StorageSafety.ValidateFolder(directory);
         var final = Path.Combine(directory, name);
         try { File.Move(temp, final); } catch (IOException) when (File.Exists(final)) { final = Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(name)}-{id}{Path.GetExtension(name)}"); File.Move(temp, final); }
-        var file = new SharedFile(id, Path.GetFileName(final), final, size, local ? "outbound" : "inbound", owner.Id, checksum.ToLowerInvariant()); files[id] = file; committed = true; return Results.Ok(new { file.Id, file.Name, file.Size, file.Sha256, verified = true });
+        var file = new SharedFile(id, Path.GetFileName(final), final, size, local ? "outbound" : "inbound", owner.Id, checksum.ToLowerInvariant()); files[id] = file; committed = true;
+        transfer = transfer with { Status = "completed", BytesTransferred = size, Updated = DateTimeOffset.UtcNow, FileId = file.Id }; Track(transfer);
+        return Results.Ok(new { file.Id, file.Name, file.Size, file.Sha256, verified = true, transferId = transfer.Id });
     }
-    catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return Results.Json(Error("transfer_cancelled", "The transfer was cancelled."), statusCode: 409); }
+    catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { transfer = transfer with { Status = "cancelled", Updated = DateTimeOffset.UtcNow, ErrorCode = "transfer_cancelled" }; Track(transfer); return Results.Json(Error("transfer_cancelled", "The transfer was cancelled."), statusCode: 409); }
+    catch (Exception e) when (e is IOException or UnauthorizedAccessException or UnsafeStorageException or InsufficientDiskSpaceException)
+    {
+        var code = e switch { UnsafeStorageException => "unsafe_folder", InsufficientDiskSpaceException => "insufficient_disk_space", UnauthorizedAccessException => "folder_access", _ => "storage_failure" };
+        transfer = transfer with { Status = "failed", Updated = DateTimeOffset.UtcNow, ErrorCode = code }; Track(transfer); throw;
+    }
     finally { try { StorageSafety.ValidateFolder(directory); if (File.Exists(temp)) File.Delete(temp); } finally { lock (gate) { if (volume is not null && diskRemaining != 0) diskReservations[volume] = diskReservations.GetValueOrDefault(volume) - diskRemaining; } if (!committed) { lock (gate) { reservedBytes -= length; reservedFiles--; } } slots.Release(); } }
 });
 app.MapGet("/api/files/{id}", (HttpContext c, string id) => { if (!Allowed(c)) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || (!IsAdmin(c) && f.RecipientId != GetDevice(c)?.Id) || !File.Exists(f.Path)) return Results.NotFound(); return Results.File(f.Path, "application/octet-stream", f.Name, enableRangeProcessing: true); });
@@ -308,4 +419,7 @@ record FolderRequest(string Path);
 record Device(string Id, string Name, bool Approved, DateTimeOffset Expires, CancellationTokenSource Cancellation);
 record SharedFile(string Id, string Name, string Path, long Size, string Direction, string RecipientId, string Sha256);
 record OfferRequest([property: System.Text.Json.Serialization.JsonRequired] string Name, [property: System.Text.Json.Serialization.JsonRequired] long Size);
-record ReceiveOffer(string Id, string Name, long Size, string DeviceId, string DeviceName, string Status, DateTimeOffset Expires);
+record ReceiveOffer(string Id, string Name, long Size, string DeviceId, string DeviceName, string Status, DateTimeOffset Expires, string? BatchId = null);
+record BatchRequest([property: System.Text.Json.Serialization.JsonRequired] OfferRequest[] Files);
+record ReceiveBatch(string Id, string DeviceId, string DeviceName, DateTimeOffset Created, string[] OfferIds);
+record TransferEntry(string Id, string Name, long Size, string DeviceId, string DeviceName, string Direction, string Status, long BytesTransferred, DateTimeOffset Updated, string? ErrorCode = null, string? FileId = null);

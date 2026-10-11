@@ -7,6 +7,7 @@ let pairCode = fragment.get('pair');
 history.replaceState(null, '', location.pathname);
 let busy = false, cancelled = false, current = null, offerCancellation = null, qrUrl = null, qrAddress = null, lastState = null;
 let platformPreference = 'auto', customDeviceName = false;
+let transferQueue = null, lastTransferEvents = [];
 try { platformPreference = MobileUX.normalizePreference(localStorage.getItem('landrop-platform')); } catch {}
 const uploadSupport = MobileUX.uploadCapabilities(globalThis);
 function applyMobileUX() {
@@ -80,7 +81,7 @@ async function refresh(cachedState = null) {
     const approvedDevices = data.devices.filter(d=>d.approved);
     $('recipient').replaceChildren(new Option(t('noRecipient'), ''), ...approvedDevices.map(d=>new Option(d.name,d.id)));
     if(approvedDevices.some(d=>d.id === selectedRecipient)) $('recipient').value = selectedRecipient;
-    else if(approvedDevices.length === 1) $('recipient').value = approvedDevices[0].id;
+    else if(approvedDevices.length === 1 && !transferQueue?.remaining().length) $('recipient').value = approvedDevices[0].id;
     renderFiles(data.files, true);
     $('offer-section').hidden = false;
     $('offers').replaceChildren();
@@ -91,19 +92,53 @@ async function refresh(cachedState = null) {
         button(t('reject'),()=>post('/api/admin/offers/'+offer.id+'/reject')));
       $('offers').append(el);
     }
+    $('batch-section').hidden = false;
+    $('batches').replaceChildren();
+    if(!data.batches?.length) $('batches').textContent = t('noBatches');
+    for(const batch of data.batches || []) {
+      const el = row(batch.deviceName, t('batchSummary',{count:batch.files.length,size:size(batch.totalSize)}));
+      const details = document.createElement('details');
+      const summary = document.createElement('summary'); summary.textContent = t('viewFiles'); details.append(summary);
+      for(const file of batch.files) { const name = document.createElement('p'); name.textContent = file.name+' · '+size(file.size); details.append(name); }
+      el.querySelector('.info').append(details);
+      el.append(button(t('acceptBatch'),()=>post('/api/admin/offer-batches/'+batch.id+'/approve')),
+        button(t('reject'),()=>post('/api/admin/offer-batches/'+batch.id+'/reject')));
+      $('batches').append(el);
+    }
+    renderTransfers(data.transfers || []);
   } else if (token) {
     const data = cachedState || await api('/api/state');
     lastState = data;
     $('waiting').hidden = data.approved; $('transfer').hidden = !data.approved; $('file-section').hidden = !data.approved;
-    if (data.approved) { if (!cachedState) await post('/api/download-session'); renderFiles(data.files, false); }
+    if (data.approved) { if (!cachedState) await post('/api/download-session'); renderFiles(data.files, false); renderTransfers(cachedState ? lastTransferEvents : await api('/api/transfers')); }
   }
+}
+function renderTransfers(events) {
+  lastTransferEvents = events;
+  $('transfer-overview').hidden = false; $('transfer-events').replaceChildren();
+  if(!events.length) $('transfer-events').textContent = t('noTransfers');
+  for(const event of [...events].sort((a,b)=>Date.parse(b.updated)-Date.parse(a.updated))) {
+    const el = row(event.name, (event.deviceName ? event.deviceName+' · ' : '')+t('state_'+event.status)+' · '+size(event.bytesTransferred)+' / '+size(event.size));
+    if(event.errorCode) { const message = document.createElement('small'); message.textContent = t(event.errorCode); el.querySelector('.info').append(message); }
+    $('transfer-events').append(el);
+  }
+}
+function renderQueue() {
+  $('queue-list').replaceChildren();
+  for(const item of transferQueue?.items || []) {
+    const el = row(item.file.name, t('state_'+item.state)+(item.error ? ' · '+item.error : ''));
+    el.dataset.state = item.state; $('queue-list').append(el);
+  }
+  $('retry-area').hidden = busy || !transferQueue?.remaining().length;
+  $('retry').disabled = busy || !uploadSupport.supported;
+  $('clear-queue').disabled = busy;
 }
 function renderFiles(files, local) {
   $('files').replaceChildren();
   if (!files.length) $('files').textContent = local ? t('noTransfers') : t('noFiles');
   for (const f of files) { const checked = f.verified === true && /^[a-f0-9]{64}$/.test(f.sha256); const el = row(f.name, size(f.size) + (local ? (f.direction === 'outbound' ? t('preparedSuffix') : t('receivedSuffix')) : '') + (checked ? t('pcCopyChecked') : '')); if (local) el.append(button(f.direction === 'outbound' ? t('unshare') : t('hide'),()=>api('/api/admin/files/'+f.id,{method:'DELETE'}))); else { const a = document.createElement('a'); a.href = '/download/'+f.id; a.textContent = t('download'); a.setAttribute('download',f.name); el.append(a); } $('files').append(el); }
 }
-function upload(file, index, count, recipientId, offerId, sha256) {
+function upload(file, index, count, recipientId, offerId, sha256, item) {
   return new Promise((resolve,reject) => {
     const meter = new TransferMeter(file.size);
     let lastRender = -Infinity;
@@ -126,7 +161,7 @@ function upload(file, index, count, recipientId, offerId, sha256) {
     xhr.setRequestHeader('Content-Type','application/octet-stream');
     xhr.setRequestHeader('X-LanDrop-SHA256',sha256);
     xhr.upload.onprogress = e => { if(e.lengthComputable) renderProgress(e.loaded); };
-    xhr.upload.onload = () => renderProgress(file.size, true);
+    xhr.upload.onload = () => { transferQueue.transition(item,'verifying'); renderQueue(); renderProgress(file.size, true); };
     xhr.onload = () => {
       let body; try { body = JSON.parse(xhr.responseText); } catch {}
       if(xhr.status >= 200 && xhr.status < 300) {
@@ -140,45 +175,56 @@ function upload(file, index, count, recipientId, offerId, sha256) {
     xhr.send(file);
   });
 }
-async function send(files) {
+async function send(files, retry = false) {
   if(!uploadSupport.supported) { notice(t('uploadUnsupported'), true); return; }
   if(busy || !files.length) return;
   const recipientId = admin ? $('recipient').value : null;
   if(admin && !recipientId) { notice(t('noRecipient'), true); return; }
+  if(files.length > 1000 || files.some(file => file.size > 10*1024**3)) { notice(t('invalid_batch'),true); return; }
+  if(!retry) transferQueue = new TransferQueue(files);
+  const pending = transferQueue.remaining();
   $('recipient').disabled = true;
-  busy = true; cancelled = false; $('file-input').disabled = true; $('progress-area').hidden = false;
+  busy = true; cancelled = false; $('file-input').disabled = true; $('progress-area').hidden = false; renderQueue();
+  let batch, activeItem;
   try {
-    for(let i=0; i<files.length; i++) {
-      if(cancelled) break;
-      if(files[i].size > 10*1024**3) throw new Error(t('invalidSize'));
-      $('progress').value = 0; $('progress-text').textContent = (i+1)+'/'+files.length+' · '+files[i].name;
-      let offerId;
-      try {
-        offerCancellation = new AbortController();
-        const sha256 = await hashFile(files[i], offerCancellation.signal, (loaded,total) => {
-          const percent = total === 0 ? 100 : Math.round(loaded*100/total);
-          $('progress').value = percent;
-          $('progress-text').textContent = (i+1)+'/'+files.length+' · '+files[i].name+' · '+t('checkingFile', {percent});
-        });
-        if(!admin) {
-          offerId = await new ReceiveOfferClient(api).approve(files[i], offerCancellation.signal, () => {
-            $('progress').value = 0;
-            $('progress-text').textContent = (i+1)+'/'+files.length+' · '+files[i].name+' · '+t('waitingForFileApproval');
-          });
-        }
-        if(cancelled) throw new Error(t('cancelled'));
-        await upload(files[i],i+1,files.length,recipientId,offerId,sha256);
-      } finally {
-        offerCancellation = null;
-        if(offerId) await api('/api/offers/'+encodeURIComponent(offerId), {method:'DELETE'}).catch(()=>{});
-      }
-      $('history').prepend(row(files[i].name, admin ? t('prepared') : t('saved')));
+    offerCancellation = new AbortController();
+    if(!admin) {
+      for(const item of pending) transferQueue.transition(item,'waiting'); renderQueue();
+      batch = await new BatchOfferClient(api).approve(pending.map(item=>item.file), offerCancellation.signal, () => {
+        $('progress').value = 0; $('progress-text').textContent = t('waitingForBatchApproval',{count:pending.length});
+      });
+    }
+    for(let i=0; i<pending.length; i++) {
+      if(cancelled) throw new DOMException('Cancelled','AbortError');
+      activeItem = pending[i]; const file = activeItem.file;
+      transferQueue.transition(activeItem,'preparing'); renderQueue();
+      const sha256 = await hashFile(file, offerCancellation.signal, (loaded,total) => {
+        const percent = total === 0 ? 100 : Math.round(loaded*100/total);
+        $('progress').value = percent; $('progress-text').textContent = (i+1)+'/'+pending.length+' · '+file.name+' · '+t('checkingFile',{percent});
+      });
+      if(cancelled) throw new DOMException('Cancelled','AbortError');
+      transferQueue.transition(activeItem,'transferring'); renderQueue();
+      await upload(file,i+1,pending.length,recipientId,batch?.offers[i].id,sha256,activeItem);
+      transferQueue.transition(activeItem,'completed'); renderQueue();
+      $('history').prepend(row(file.name, admin ? t('prepared') : t('saved')));
+      activeItem = null;
     }
     if(!cancelled) notice(t(admin ? 'outgoingDone' : 'done'));
     await refresh();
-  } catch(e) { notice(e.name === 'AbortError' ? t('cancelled') : e.code ? t(e.code) : translations.en[e.message] ? t(e.message) : e.message,true); }
-  finally { current = null; busy = false; $('recipient').disabled = false; $('file-input').disabled = !uploadSupport.supported; $('file-input').value = ''; $('progress-area').hidden = true; }
+  } catch(e) {
+    const message = cancelled || e.name === 'AbortError' ? t('cancelled') : e.code ? t(e.code) : translations.en[e.message] ? t(e.message) : e.message;
+    if(activeItem) transferQueue.transition(activeItem,cancelled ? 'cancelled' : 'failed',message);
+    else for(const item of pending) if(item.state !== 'completed') transferQueue.transition(item,cancelled ? 'cancelled' : 'failed',message);
+    for(const item of pending) if(item.state === 'waiting') transferQueue.transition(item,'queued');
+    notice(message,true);
+  }
+  finally {
+    if(batch?.id) await api('/api/offer-batches/'+encodeURIComponent(batch.id),{method:'DELETE'}).catch(()=>{});
+    offerCancellation = null; current = null; busy = false; $('recipient').disabled = false; $('file-input').disabled = !uploadSupport.supported; $('file-input').value = ''; $('progress-area').hidden = true; renderQueue();
+  }
 }
+$('retry').onclick = () => { if(transferQueue && !busy) send(transferQueue.remaining().map(item=>item.file),true); };
+$('clear-queue').onclick = () => { if(!busy) { transferQueue = null; renderQueue(); } };
 $('file-input').onchange = e => send([...e.target.files]);
 $('cancel').onclick = () => { cancelled = true; offerCancellation?.abort(); current?.abort(); };
 $('drop').ondragover = e => { e.preventDefault(); if(uploadSupport.supported) $('drop').classList.add('drag'); };
@@ -193,7 +239,7 @@ applyLanguage();
 applyMobileUX();
 $('device-name').oninput = () => { customDeviceName = true; };
 $('platform').onchange = () => { platformPreference = MobileUX.normalizePreference($('platform').value); try { localStorage.setItem('landrop-platform', platformPreference); } catch {} applyMobileUX(); };
-$('language').onchange = () => { setLanguage($('language').value); applyMobileUX(); refresh(lastState).catch(e=>notice(e.message,true)); const qrImage = $('qr').querySelector('img'); if(qrImage) qrImage.alt = t('qrAlt'); };
+$('language').onchange = () => { setLanguage($('language').value); applyMobileUX(); renderQueue(); refresh(lastState).catch(e=>notice(e.message,true)); const qrImage = $('qr').querySelector('img'); if(qrImage) qrImage.alt = t('qrAlt'); };
 if (pairCode && !admin) { token = null; sessionStorage.removeItem('landrop-session'); $('pair').hidden = false; }
 else if(!admin && !token) $('welcome').hidden = false;
 else refresh().catch(e=>notice(e.message,true));

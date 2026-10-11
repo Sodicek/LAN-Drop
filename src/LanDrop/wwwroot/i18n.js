@@ -139,6 +139,7 @@ const translations = {
 translations.en.loopback = 'Local-only mode. Restart LAN Drop with your Wi-Fi address to connect a phone.';
 translations.cs.loopback = 'Pouze místní režim. Pro připojení telefonu restartuj LAN Drop s adresou Wi-Fi adaptéru.';
 Object.assign(translations.en, {
+  clearQueue:'Clear unfinished selection', clearQueueHelp:'This releases the selected source files from this tab. Saved files stay on the PC.',
   unsafe_folder:'This folder uses a link or junction. Choose a direct local folder.',
   insufficient_disk_space:'There is not enough free disk space. Choose another folder or free space.',
   "invalid_host": "Invalid request host.",
@@ -160,6 +161,7 @@ Object.assign(translations.en, {
   "transfer_cancelled": "The transfer was cancelled."
 });
 Object.assign(translations.cs, {
+  clearQueue:'Vymazat nedokončený výběr', clearQueueHelp:'Uvolní vybrané zdrojové soubory z této karty. Uložené soubory na PC zůstanou zachované.',
   unsafe_folder:'Tato složka používá odkaz nebo junction. Vyber přímo místní složku.',
   insufficient_disk_space:'Na disku není dost volného místa. Vyber jinou složku nebo uvolni místo.',
   "invalid_host": "Neplatná adresa požadavku.",
@@ -183,6 +185,32 @@ Object.assign(translations.cs, {
 translations.en.file_limit = 'The registered file limit is reached. Remove shared files or restart sharing.';
 translations.cs.file_limit = 'Byl dosažen limit evidovaných souborů. Odeber sdílené soubory nebo restartuj sdílení.';
 let languagePreference = 'en';
+Object.assign(translations.en, {
+  batchesTitle:'Incoming batches', batchesHelp:'Review every name and the total size, then accept the whole selection.',
+  noBatches:'No incoming batches.', batchSummary:'{count} files · {size}', viewFiles:'View file list',
+  acceptBatch:'Accept all files', waitingForBatchApproval:'Waiting for the PC to accept {count} files…',
+  invalid_batch:'Choose 1–1,000 files, each up to 10 GB, within the PC storage quota.',
+  transferOverview:'Transfer activity', activityHelp:'Activity for this sharing session. Browser downloads do not confirm saving on the phone.',
+  retry:'Retry unfinished files', retryHelp:'Selected files stay in this tab. Retry requests new approval and skips completed files. If the last response was lost, check the PC transfer list first to avoid duplicates.',
+  connectionHelpTitle:'Connection help', connectionHelp:'Keep both devices on the same reachable network. Guest Wi-Fi or a VPN can prevent connection. On Windows, check the selected private/domain adapter and firewall permissions for LAN Drop. After sleep or an address change, reconnect with a fresh QR; check the PC transfer list before retrying unfinished files.',
+  state_queued:'Queued', state_waiting:'Waiting for acceptance', state_preparing:'Checking source file',
+  state_transferring:'Transferring', state_verifying:'Verifying saved copy', state_completed:'Completed on PC',
+  state_failed:'Failed', state_cancelled:'Cancelled', state_pending:'Waiting for acceptance',
+  state_approved:'Accepted', state_rejected:'Declined', state_expired:'Expired'
+});
+Object.assign(translations.cs, {
+  batchesTitle:'Příchozí dávky', batchesHelp:'Zkontroluj názvy a celkovou velikost, pak přijmi celý výběr najednou.',
+  noBatches:'Žádné příchozí dávky.', batchSummary:'{count} souborů · {size}', viewFiles:'Zobrazit seznam souborů',
+  acceptBatch:'Přijmout všechny soubory', waitingForBatchApproval:'Čekám, až počítač přijme {count} souborů…',
+  invalid_batch:'Vyber 1–1 000 souborů, každý nejvýše 10 GB, v rámci kvóty úložiště na PC.',
+  transferOverview:'Průběh přenosů', activityHelp:'Přehled pro toto spuštění sdílení. Stažení v prohlížeči nepotvrzuje uložení v telefonu.',
+  retry:'Opakovat nedokončené soubory', retryHelp:'Vybrané soubory zůstávají v této kartě. Opakování vyžádá nové schválení a přeskočí dokončené soubory. Pokud poslední odpověď nepřišla, nejprve zkontroluj přehled na PC, abys předešel duplicitám.',
+  connectionHelpTitle:'Pomoc s připojením', connectionHelp:'Obě zařízení musí být ve vzájemně dostupné síti. Hostovská Wi-Fi nebo VPN mohou připojení blokovat. Na Windows ověř vybraný privátní/doménový adaptér a oprávnění LAN Drop ve firewallu. Po uspání nebo změně adresy načti nový QR; před opakováním nedokončených souborů zkontroluj přehled na PC.',
+  state_queued:'Ve frontě', state_waiting:'Čeká na přijetí', state_preparing:'Kontroluje se zdrojový soubor',
+  state_transferring:'Přenáší se', state_verifying:'Ověřuje se uložená kopie', state_completed:'Dokončeno na PC',
+  state_failed:'Selhalo', state_cancelled:'Zrušeno', state_pending:'Čeká na přijetí',
+  state_approved:'Přijato', state_rejected:'Odmítnuto', state_expired:'Vypršelo'
+});
 Object.assign(translations.en, {
   checkingFile:'Checking file · {percent} %', pcCopyChecked:' · PC copy checked',
   checksum_failed:'Could not check this file. Choose it again and retry.',

@@ -42,6 +42,7 @@ jobs:
           node --check src/LanDrop/wwwroot/integrity.js
           node --check src/LanDrop/wwwroot/hash-worker.js
           node --check src/LanDrop/wwwroot/mobile.js
+          node --check src/LanDrop/wwwroot/queue.js
           node --check src/LanDrop/wwwroot/vendor/sha256.js
       - name: Check localization coverage
         run: node tests/localization.cjs
@@ -51,12 +52,18 @@ jobs:
         run: node tests/progress.cjs
       - name: Check phone approval workflow
         run: node tests/offers.cjs
+      - name: Check retained phone selections
+        run: node tests/queue.cjs
       - name: Check file integrity and saved-file receipts
         run: node tests/integrity.cjs
       - name: Check native saved-file receipts
         run: dotnet run --project tests/DesktopIntegrity -c Release
+      - name: Check retained desktop selections
+        run: dotnet run --project tests/DesktopQueue -c Release
       - name: Run HTTP integration checks
         run: python tests/integration.py
+      - name: Check grouped consent, retry, and transfer isolation
+        run: python tests/batches.py
       - name: Install Chromium for browser checks
         run: npx playwright install chromium
       - name: Check Android-emulated Chromium transfers

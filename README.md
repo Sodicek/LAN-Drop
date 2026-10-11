@@ -10,7 +10,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 
 - Native Windows WPF window, network interface selection and explicit start/stop sharing.
 - Locally generated QR code, approval on the PC, short-lived pairing and revocable sessions.
-- Per-file incoming offers: check the phone, name and size on the PC, then accept or reject before upload.
+- Incoming batch offers: check the phone, all names and total size on the PC, then accept or reject the selection before upload.
 - Individual recipients: each phone can list/download only files addressed to it.
 - Multiple files uploaded sequentially, progress, speed, time estimates and cancellation; empty files supported.
 - SHA-256 preparation, transfer checks and stored-file readback before confirming a saved PC copy.
@@ -18,6 +18,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 - Destination folder dialog, persistent folder/network/language preferences and notification-area access.
 - English and Czech on Windows and the web; automatic language option and English fallback.
 - Android/iPhone guidance, automatic phone detection with a manual override, and upload capability checks.
+- Current-session transfer states, manual retry of unfinished selections and connection-recovery help.
 - Default loopback-only server; optional single selected IPv4 interface for phone access.
 - Upload concurrency and per-run byte/file limits.
 - Desktop network diagnostics, a start-time private/domain profile gate and periodic monitoring that stops unsafe sharing.
@@ -38,7 +39,7 @@ Or double-click **Start-LAN-Drop.cmd**. It builds the solution and opens the Win
 2. Click **Start sharing**, scan the QR on the phone and enter a device name.
 3. Approve that request on the PC. Generate a new QR to connect another phone.
 4. Choose a recipient before adding files on the PC. On the phone, use **Download**.
-5. On the phone, choose files. Accept each request on the PC to start its upload to the chosen folder (default: Downloads/LAN-Drop). Reject it or cancel on the phone to skip sending. Requests expire after ten minutes.
+5. On the phone, choose files. Review the batch on the PC and accept once to upload them sequentially to the chosen folder (default: Downloads/LAN-Drop). Pending requests expire after ten minutes; batch acceptance is valid for two hours, bounded by the device session. Reject the batch or cancel on the phone to stop the selection.
 6. **Hide to notification area** keeps sharing running; double-click the tray icon to reopen. Closing the window stops sharing.
 
 The phone browser manages downloaded files. On Android, look in Chrome's Downloads; on iPhone, use Safari's downloads and Files. LAN Drop does not automatically save images into the gallery or claim that a browser download has been saved successfully. Keep the browser tab visible and the screen awake during preparation and uploads. If a QR scanner opens an embedded browser with a broken picker or download, open the link in Chrome on Android or Safari on iPhone. See the [Android guide](docs/ANDROID.md) ([česky](docs/cs/ANDROID.md)).
@@ -73,21 +74,26 @@ English is the default. Choose **Čeština** or **Automatic** independently on t
 ./scripts/Publish-Portable.ps1
 ```
 
-The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-alpha.5-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
+The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.1-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
+
+Run `./scripts/Package-Release.ps1` after publishing to create a ZIP and its SHA-256 checksum. Candidate release notes and the [release test matrix](docs/RELEASE-TEST-MATRIX.md) explain which checks are automated and which still require real phones and clean Windows.
 
 ## Verification
 
 ```powershell
 dotnet build LanDrop.slnx -c Release
 python tests/integration.py
+python tests/batches.py
 python tests/storage_safety.py
 node tests/localization.cjs
 node tests/progress.cjs
 node tests/offers.cjs
 node tests/integrity.cjs
 node tests/mobile.cjs
+node tests/queue.cjs
 dotnet run --project tests/NetworkPolicy -c Release
 dotnet run --project tests/DesktopIntegrity -c Release
+dotnet run --project tests/DesktopQueue -c Release
 dotnet run --project src/LanDrop.Desktop -c Release --no-build -- --smoke-test
 python tests/desktop_lifecycle.py
 ```
@@ -101,10 +107,10 @@ For browser checks, run `npm ci --ignore-scripts`, `npx playwright install chrom
 ## Known limitations
 
 - HTTP is not encrypted. Trusted HTTPS in supported phone browsers remains an architecture decision and a stable-release gate.
-- No resumable upload or persistent transfer history yet.
+- No resumable upload or persistent transfer history yet. The current queue lives in the browser tab or Windows app; closing/reloading loses retained selections. Activity holds up to 200 entries for the current server run.
 - Checksums verify the saved PC copy at commit time. They do not encrypt or authenticate HTTP, guarantee survival of power loss, or verify a phone browser download. Later changes to saved files are not automatically detected.
 - Hash preparation reads the source before upload, and the server reads the saved temporary copy again. Large-file performance and real Android/iPhone behavior still need measurement.
-- Incoming offers are per file, valid for ten minutes and bound to the device, name and declared size. They do not verify file contents. An attempted upload consumes approval even if it fails; retry with a new request.
+- Incoming batch offers are bound to the device and each file's name/declared size. Pending offers expire after ten minutes and approved batches after two hours. An attempted upload consumes that file's grant even if it fails. Manual retry creates a new request for unfinished files; a lost success response may require checking the PC list to avoid duplicates.
 - The 10 GB per-file limit is a configured ceiling, not a benchmarked guarantee.
 - Byte quota is cumulative for the server run; deleting an outgoing share releases its bytes. Hiding incoming entries preserves their files and quota. Restart resets the quota; this is not total-disk accounting.
 - Inactive owned outboxes are cleaned after a crash. Unmarked folders and completed inbox files are preserved; incomplete inbox files may remain.

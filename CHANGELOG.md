@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0-rc.1 — 2026-10-11
+
+Release candidate; physical-device, clean-machine and secure-transport gates remain open.
+
+### Added
+- Batch receive offers with names, total size and one PC decision for the complete selection.
+- Current-session transfer activity with progress, verification, completed, failed and cancelled states.
+- Manual retry of unfinished browser/native selections without reopening the file picker; verified completed items are skipped.
+- English/Czech connection help for private networks, guest isolation, firewall access, changed addresses and sleep recovery.
+- Batch/queue/retry tests, expanded native lifecycle checks and physical release-test procedures.
+- Versioned portable ZIP packaging with SHA-256 checksums and included documentation.
+
+### Known gaps
+- HTTP is unencrypted; authenticated secure transport is required before a security-hardened stable release.
+- Physical Android/iPhone, clean Windows, managed firewall and sleep/wake checks are not yet performed.
+- Queues and transfer activity are in memory for the current tab/app/run. Retry starts again and requires fresh consent; it is not resume.
+- An ambiguous lost success response can leave a saved file; check the PC transfer list before retrying.
+
 ## 0.2.0-alpha.5 — 2026-10-11
 
 ### Added

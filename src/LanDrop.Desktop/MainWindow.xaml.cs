@@ -44,11 +44,15 @@ public partial class MainWindow : Window
     private int? lastStopExitCode;
     private CancellationTokenSource? transfer;
     private ServerState? lastState;
+    private readonly RetainedTransferQueue retryQueue = new();
+    private string[] retryPaths => retryQueue.Paths;
+    private string? retryRecipient => retryQueue.Recipient;
     private string settingsPath => Path.Combine(dataDirectory, "desktop.json");
     private string T(string key) => translations.GetValueOrDefault(key, english.GetValueOrDefault(key, key));
     public MainWindow()
     {
         InitializeComponent();
+        Recipient.SelectionChanged += (_,_) => { if(!renderingState && !uploading && Recipient.SelectedValue is string) retryTargetExplicitlySelected = true; };
         english = LoadLanguage("en"); translations = english;
         try { if (!App.SmokeTest && File.Exists(settingsPath)) settings = JsonSerializer.Deserialize<DesktopSettings>(File.ReadAllText(settingsPath)) ?? new(); } catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
         LanguagePicker.ItemsSource = new[] { new LanguageChoice("en", "English"), new LanguageChoice("cs", "Čeština"), new LanguageChoice("auto", "Automatic / Automaticky") };
@@ -95,6 +99,8 @@ public partial class MainWindow : Window
         ConnectionGroup.Header = T("Connect"); FolderGroup.Header = T("Folder"); DevicesGroup.Header = T("Devices");
         OffersGroup.Header = T("IncomingOffers"); OffersHelp.Text = T("OffersHelp");
         SendGroup.Header = T("Send"); FilesGroup.Header = T("Files"); RecipientLabel.Text = T("Recipient");
+        TransfersGroup.Header = T("Transfers"); TransfersHelp.Text = T("TransfersHelp");
+        RetryButton.Content = T("Retry"); ClearRetryButton.Content = T("ClearRetry"); TransferFolderButton.Content = T("OpenFolder"); UpdateRetry();
         foreach (var pair in new[] { (StartButton,"Start"),(StopButton,"Stop"),(NewQrButton,"NewQr"),(CopyLinkButton,"CopyLink"),(ChooseFolderButton,"ChooseFolder"),(OpenFolderButton,"OpenFolder"),(SendButton,"ChooseFiles"),(CancelButton,"Cancel"),(HideButton,"Hide"),(DiagnosticsButton,"Diagnostics") }) pair.Item1.Content = T(pair.Item2);
         VersionText.Text = "LAN Drop " + (Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "development");
         if(server is null) Status.Text = T("Stopped");
@@ -222,6 +228,34 @@ public partial class MainWindow : Window
                 if(decided.GetProperty("status").GetString() != (action == "approve" ? "approved" : "rejected") || lastState?.Offers?.Any(o => o.Id == id) == true)
                     throw new IOException("Desktop offer action did not complete.");
             }
+            foreach(var action in new[] { "approve", "reject" })
+            {
+                var batch = await PhoneApi("/api/offer-batches",HttpMethod.Post,new { files = new[] { new { name = "batch-first.txt",size = 10 }, new { name = "batch-second.txt",size = 20 } } });
+                var id = batch.GetProperty("id").GetString()!;
+                await Poll();
+                if(lastState?.Batches?.SingleOrDefault(b => b.Id == id) is not { } shown || shown.TotalSize != 30 || shown.Files.Length != 2)
+                    throw new IOException("Batch did not reach desktop.");
+                if(!OffersPanel.Children.OfType<StackPanel>().Any(p => p.Children.OfType<Expander>().Any()))
+                    throw new IOException("Batch file detail did not render.");
+                await DecideBatch(id,action);
+                var decided = await PhoneApi("/api/offer-batches/" + id,HttpMethod.Get);
+                if(decided.GetProperty("status").GetString() != (action == "approve" ? "approved" : "rejected") || lastState?.Batches?.Any(b => b.Id == id) == true)
+                    throw new IOException("Desktop batch action did not complete.");
+            }
+            var firstRetry = Path.Combine(dataDirectory,"retry-first.txt");
+            var remainingRetry = Path.Combine(dataDirectory,"retry-remaining.txt");
+            await File.WriteAllTextAsync(firstRetry,"Confirmed file must not be sent twice.");
+            await SendFiles([firstRetry,remainingRetry]); // Real second-file IO failure, retaining only its suffix.
+            await Poll();
+            if(!retryPaths.SequenceEqual([remainingRetry]) || lastState!.Files.Count(f => f.Name == "retry-first.txt") != 1)
+                throw new IOException("Retry retained completed sources.");
+            await File.WriteAllTextAsync(remainingRetry,"New contents are hashed on retry.");
+            await RetryRetainedFiles();
+            await Poll();
+            if(retryPaths.Length != 0 || lastState!.Files.Count(f => f.Name == "retry-first.txt") != 1 || lastState.Files.Count(f => f.Name == "retry-remaining.txt") != 1)
+                throw new IOException("Retry duplicated a confirmed source or lost the remaining source.");
+            if(lastState.Transfers?.Any(t => t.Status == "completed") != true || TransfersPanel.Children.Count == 0)
+                throw new IOException("Transfer overview did not reach desktop.");
             var folder = Path.Combine(dataDirectory, "Inbox");
             Directory.CreateDirectory(folder);
             await Api("/api/admin/folder", HttpMethod.Post, new { path = folder });
@@ -229,7 +263,7 @@ public partial class MainWindow : Window
             if(lastState?.Inbox != folder) throw new IOException("Folder roundtrip failed.");
             await StopServer();
             if(server is not null || lastStopExitCode != 0) throw new IOException("Server did not stop gracefully.");
-            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, OutboundVerified = true, ServerExitCode = lastStopExitCode }));
+            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, BatchesApproved = true, BatchesRejected = true, RetryWithoutDuplicates = true, TransfersRendered = true, OutboundVerified = true, ServerExitCode = lastStopExitCode }));
             result = 0;
         }
         catch(Exception) { await StopServer(); }
@@ -305,11 +339,14 @@ public partial class MainWindow : Window
     private void RenderState(ServerState state)
     {
         FolderText.Text = state.Inbox;
+        renderingState = true;
         var selected = Recipient.SelectedValue as string;
         Recipient.ItemsSource = state.Devices.Where(d => d.Approved).ToArray();
         Recipient.SelectedValue = selected;
-        if(Recipient.SelectedItem is null && Recipient.Items.Count == 1) Recipient.SelectedIndex = 0;
-        SendButton.IsEnabled = !uploading && Recipient.Items.Count > 0 && server is not null;
+        if(Recipient.SelectedItem is null && Recipient.Items.Count == 1 && retryPaths.Length == 0) Recipient.SelectedIndex = 0;
+        renderingState = false;
+        SendButton.IsEnabled = !uploading && retryPaths.Length == 0 && Recipient.Items.Count > 0 && server is not null;
+        UpdateRetry(); TransferFolderButton.IsEnabled = server is not null && Directory.Exists(inbox);
         DevicesPanel.Children.Clear();
         if(state.Devices.Length == 0) DevicesPanel.Children.Add(new TextBlock { Text = T("NoDevices") });
         foreach(var device in state.Devices)
@@ -323,7 +360,25 @@ public partial class MainWindow : Window
         }
         OffersPanel.Children.Clear();
         var offers = state.Offers ?? [];
-        if(offers.Length == 0) OffersPanel.Children.Add(new TextBlock { Text = T("NoOffers") });
+        var batches = state.Batches ?? [];
+        if(offers.Length == 0 && batches.Length == 0) OffersPanel.Children.Add(new TextBlock { Text = T("NoOffers") });
+        foreach(var batch in batches)
+        {
+            var panel = new StackPanel();
+            panel.Children.Add(new TextBlock { Text = $"{batch.DeviceName} · {batch.Files.Length} {T("BatchFiles")} · {batch.TotalSize:N0} B" });
+            var details = new StackPanel();
+            foreach(var file in batch.Files) details.Children.Add(new TextBlock { Text = $"{file.Name} · {file.Size:N0} B" });
+            panel.Children.Add(new Expander { Header = T("BatchDetails"), Content = details, Margin = new Thickness(0,0,0,8) });
+            var actions = new WrapPanel(); var accept = new Button { Content = T("AcceptAll") }; var reject = new Button { Content = T("RejectAll") };
+            async Task Decide(string action)
+            {
+                accept.IsEnabled = reject.IsEnabled = false;
+                try { await DecideBatch(batch.Id,action); }
+                catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; accept.IsEnabled = reject.IsEnabled = server is not null; }
+            }
+            accept.Click += async (_,_) => await Decide("approve"); reject.Click += async (_,_) => await Decide("reject");
+            actions.Children.Add(accept); actions.Children.Add(reject); panel.Children.Add(actions); OffersPanel.Children.Add(panel);
+        }
         foreach(var offer in offers)
         {
             var row = new DockPanel();
@@ -352,10 +407,28 @@ public partial class MainWindow : Window
             var label = f.Direction == "outbound" ? (verified ? "ReadyVerified" : "Ready") : (verified ? "ReceivedVerified" : "Received");
             row.Children.Add(remove); row.Children.Add(new TextBlock { Text = $"{f.Name} · {f.Size:N0} B · {T(label)}",VerticalAlignment = VerticalAlignment.Center }); FilesPanel.Children.Add(row);
         }
+        TransfersPanel.Children.Clear();
+        var transfers = state.Transfers ?? [];
+        if(transfers.Length == 0) TransfersPanel.Children.Add(new TextBlock { Text = T("NoTransfers") });
+        foreach(var item in transfers.OrderByDescending(t => t.Updated))
+        {
+            var panel = new StackPanel { Margin = new Thickness(0,0,0,12) };
+            var error = string.IsNullOrEmpty(item.ErrorCode) ? "" : " · " + (english.ContainsKey("Error_" + item.ErrorCode) ? T("Error_" + item.ErrorCode) : T("OperationFailed"));
+            panel.Children.Add(new TextBlock { Text = $"{item.Name} · {item.DeviceName} · {T(item.Direction == "inbound" ? "TransferInbound" : "TransferOutbound")} · {T("Transfer_" + item.Status)}{error}" });
+            var bytes = Math.Clamp(item.BytesTransferred,0,Math.Max(0,item.Size));
+            panel.Children.Add(new TextBlock { Text = $"{bytes:N0} / {item.Size:N0} B · {item.Updated.LocalDateTime:t}", Margin = new Thickness(0,0,0,4) });
+            if(item.Status is "transferring" or "verifying") panel.Children.Add(new ProgressBar { Maximum = 100, Value = item.Size == 0 ? 100 : bytes * 100d / item.Size, Height = 8 });
+            TransfersPanel.Children.Add(panel);
+        }
     }
     private async Task DecideOffer(string id,string action)
     {
         await Api($"/api/admin/offers/{Uri.EscapeDataString(id)}/{action}",HttpMethod.Post);
+        await Poll();
+    }
+    private async Task DecideBatch(string id,string action)
+    {
+        await Api($"/api/admin/offer-batches/{Uri.EscapeDataString(id)}/{action}",HttpMethod.Post);
         await Poll();
     }
     private async Task RefreshQr()
@@ -380,11 +453,39 @@ public partial class MainWindow : Window
     private void OpenFolder(object sender,RoutedEventArgs e) { if(Directory.Exists(inbox)) Process.Start(new ProcessStartInfo(inbox) { UseShellExecute = true }); }
     private async void SelectFiles(object sender,RoutedEventArgs e) { var dialog = new OpenFileDialog { Multiselect = true }; if(dialog.ShowDialog(this) == true) await SendFiles(dialog.FileNames); }
     private async void FilesDropped(object sender,DragEventArgs e) { if(e.Data.GetData(DataFormats.FileDrop) is string[] paths) await SendFiles(paths); }
+    private void UpdateRetry()
+    {
+        RetryButton.IsEnabled = retryPaths.Length > 0 && server is not null && !uploading;
+        ClearRetryButton.IsEnabled = retryPaths.Length > 0 && !uploading;
+        RetryHelp.Text = retryPaths.Length == 0 ? "" : string.Format(CultureInfo.CurrentCulture,T("RetryHelp"),retryPaths.Length);
+    }
+    private async void RetryFiles(object sender,RoutedEventArgs e) => await RetryRetainedFiles();
+    private void ClearRetry(object sender,RoutedEventArgs e)
+    {
+        if(uploading) return;
+        retryQueue.Clear(); retryTargetExplicitlySelected = false; UpdateRetry();
+        SendButton.IsEnabled = server is not null && Recipient.Items.Count > 0;
+        Status.Text = T("RetryCleared");
+    }
+    private async Task RetryRetainedFiles()
+    {
+        if(retryPaths.Length == 0 || uploading) return;
+        if(Recipient.SelectedValue is not string selected || lastState?.Devices.Any(d => d.Id == selected && d.Approved) != true)
+        { Status.Text = T("SelectRecipient"); return; }
+        // A lost/revoked target must be explicitly replaced by the user in the recipient picker.
+        if(selected != retryRecipient && !retryTargetExplicitlySelected) { Status.Text = T("RetrySelectRecipient"); return; }
+        await SendFiles(retryPaths.ToArray());
+    }
+    private bool retryTargetExplicitlySelected;
+    private bool renderingState;
     private async Task SendFiles(string[] paths)
     {
         if(uploading) return;
+        if(retryPaths.Length > 0 && !retryPaths.SequenceEqual(paths)) { Status.Text = T("RetryPending"); return; }
         if(Recipient.SelectedValue is not string recipient || server is null) { Status.Text = T("SelectRecipient"); return; }
+        retryQueue.Begin(paths,recipient); retryTargetExplicitlySelected = false;
         transfer = new CancellationTokenSource(); uploading = true; SendButton.IsEnabled = false; CancelButton.IsEnabled = true; Recipient.IsEnabled = false;
+        UpdateRetry();
         try
         {
             foreach(var path in paths)
@@ -427,12 +528,13 @@ public partial class MainWindow : Window
                 }
                 catch(JsonException ex) { throw new IOException(T("IntegrityFailed"),ex); }
                 UploadProgress.Value = 100; ProgressText.Text = info.Name + " · " + T("ReadyVerified");
+                retryQueue.ConfirmCurrent();
             }
             Status.Text = T("ReadyForPhone"); await Poll();
         }
         catch(OperationCanceledException) { Status.Text = T("Cancelled"); }
         catch(Exception ex) when(ex is IOException or HttpRequestException or UnauthorizedAccessException) { Status.Text = ex.Message; }
-        finally { uploading = false; Recipient.IsEnabled = true; CancelButton.IsEnabled = false; SendButton.IsEnabled = server is not null && Recipient.Items.Count > 0; transfer.Dispose(); transfer = null; }
+        finally { uploading = false; Recipient.IsEnabled = true; CancelButton.IsEnabled = false; SendButton.IsEnabled = retryPaths.Length == 0 && server is not null && Recipient.Items.Count > 0; transfer.Dispose(); transfer = null; UpdateRetry(); }
     }
     private void CancelTransfer(object sender,RoutedEventArgs e) => transfer?.Cancel();
     private void HideToTray(object sender,RoutedEventArgs e) { tray.Visible = true; Hide(); }
@@ -449,7 +551,8 @@ public partial class MainWindow : Window
             lastStopExitCode = owned.ExitCode;
             owned.Dispose();
         }
-        baseUrl = adminKey = null; lastState = null; DevicesPanel.Children.Clear(); OffersPanel.Children.Clear(); FilesPanel.Children.Clear(); Recipient.ItemsSource = null;
+        baseUrl = adminKey = null; lastState = null; DevicesPanel.Children.Clear(); OffersPanel.Children.Clear(); FilesPanel.Children.Clear(); TransfersPanel.Children.Clear(); Recipient.ItemsSource = null;
+        TransferFolderButton.IsEnabled = false; UpdateRetry();
         StartButton.IsEnabled = Network.IsEnabled = true; StopButton.IsEnabled = ChooseFolderButton.IsEnabled = OpenFolderButton.IsEnabled = NewQrButton.IsEnabled = SendButton.IsEnabled = CopyLinkButton.IsEnabled = false;
         Status.Text = T("Stopped"); stopping = false;
     }
@@ -465,7 +568,10 @@ record DesktopSettings(string Language = "en",string? Address = null);
 record DeviceInfo(string Id,string Name,bool Approved);
 record FileInfoDto(string Id,string Name,long Size,string Direction,string? Sha256 = null,bool Verified = false);
 record OfferInfo(string Id,string Name,long Size,string DeviceId,string DeviceName,string Status,DateTimeOffset Expires);
-record ServerState(string Inbox,DeviceInfo[] Devices,FileInfoDto[] Files,OfferInfo[]? Offers = null);
+record BatchFileInfo(string Id,string Name,long Size);
+record BatchInfo(string Id,string DeviceId,string DeviceName,long TotalSize,DateTimeOffset Expires,BatchFileInfo[] Files);
+record TransferInfo(string Id,string Name,long Size,string DeviceId,string DeviceName,string Direction,string Status,long BytesTransferred,DateTimeOffset Updated,string? ErrorCode = null,string? FileId = null);
+record ServerState(string Inbox,DeviceInfo[] Devices,FileInfoDto[] Files,OfferInfo[]? Offers = null,BatchInfo[]? Batches = null,TransferInfo[]? Transfers = null);
 
 sealed class ProgressReadStream(Stream inner,Action<long> progress) : Stream
 {

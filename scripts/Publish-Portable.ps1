@@ -9,4 +9,8 @@ dotnet publish (Join-Path $taskRoot "src/LanDrop") -c Release -r $Runtime --self
 if ($LASTEXITCODE -ne 0) { throw "Server publish failed." }
 Copy-Item -LiteralPath (Join-Path $taskRoot "README.md") -Destination $taskOutput
 Copy-Item -LiteralPath (Join-Path $taskRoot "THIRD-PARTY-NOTICES.md") -Destination $taskOutput
+foreach ($taskDocument in @("CHANGELOG.md", "SECURITY.md", "ToDo.md", "PRODUCT-DESIGN.md")) {
+    Copy-Item -LiteralPath (Join-Path $taskRoot $taskDocument) -Destination $taskOutput
+}
+Copy-Item -LiteralPath (Join-Path $taskRoot "docs") -Destination $taskOutput -Recurse -Force
 Write-Output "Portable preview ready: $taskOutput"

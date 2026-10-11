@@ -68,10 +68,10 @@ async function main() {
     const payload = Buffer.from('Android browser upload\nŽluťoučký kůň 🐎\n'.repeat(2000));
     const name = 'Android – příloha 🐎.txt';
     await page.locator('#file-input').setInputFiles({name, mimeType:'text/plain', buffer:payload});
-    const offer = await until(async () => (await api('/api/admin')).offers.find(o => o.name === name), 'browser hash worker and offer');
-    assert.equal(offer.size, payload.length);
+    const batch = await until(async () => (await api('/api/admin')).batches.find(b => b.files.some(o => o.name === name)), 'browser hash worker and batch');
+    assert.equal(batch.files[0].size, payload.length);
     assert.equal((await fs.readdir(inbox)).length, 0, 'Nothing is saved before PC accepts');
-    await api(`/api/admin/offers/${offer.id}/approve`, 'POST');
+    await api(`/api/admin/offer-batches/${batch.id}/approve`, 'POST');
     await page.locator('#history .row').first().waitFor();
     assert.deepEqual(await fs.readFile(path.join(inbox, name)), payload);
     const received = (await api('/api/admin')).files.find(f => f.name === name);
@@ -79,10 +79,41 @@ async function main() {
     assert.equal(received.verified, true);
     // Cancelling a second offer must not write a file or consume PC storage.
     await page.locator('#file-input').setInputFiles({name:'cancelled-android.txt', mimeType:'text/plain', buffer:Buffer.from('do not save')});
-    await until(async () => (await api('/api/admin')).offers.find(o => o.name === 'cancelled-android.txt'), 'cancel offer');
+    await until(async () => (await api('/api/admin')).batches.find(b => b.files.some(o => o.name === 'cancelled-android.txt')), 'cancel batch');
     await page.locator('#cancel').click();
-    await until(async () => !(await api('/api/admin')).offers.some(o => o.name === 'cancelled-android.txt'), 'offer cancelled');
+    await until(async () => !(await api('/api/admin')).batches.some(b => b.files.some(o => o.name === 'cancelled-android.txt')), 'batch cancelled');
     assert.deepEqual(await fs.readdir(inbox), [name]);
+    // Twenty selected photos require one PC consent, then preserve every file.
+    const photos = Array.from({length:20}, (_, i) => ({name:`batch-photo-${i}.txt`, mimeType:'text/plain', buffer:Buffer.from(`photo ${i} 🐎`)}));
+    await page.locator('#file-input').setInputFiles(photos);
+    const photoBatch = await until(async () => (await api('/api/admin')).batches.find(b => b.files.length === 20), '20-file batch');
+    assert.equal(photoBatch.totalSize, photos.reduce((sum, p) => sum + p.buffer.length, 0));
+    assert.equal((await fs.readdir(inbox)).length, 1, 'Batch saves no bytes before consent');
+    await api(`/api/admin/offer-batches/${photoBatch.id}/approve`, 'POST');
+    await until(async () => (await fs.readdir(inbox)).length === 21, '20 uploaded photos');
+    await until(async () => await page.locator('#queue-list [data-state="completed"]').count() === 20, '20 verified browser completions');
+    for(const photo of photos) assert.deepEqual(await fs.readFile(path.join(inbox, photo.name)), photo.buffer);
+    // A lost upload retains the File selection and asks for new consent on Retry.
+    let interrupted = false;
+    const failOnce = async route => {
+      if(!interrupted && route.request().method() === 'PUT') { interrupted = true; await route.abort('connectionfailed'); }
+      else await route.continue();
+    };
+    await page.route('**/api/files?*', failOnce);
+    const retained = {name:'retry-android.txt', mimeType:'text/plain', buffer:Buffer.from('retry retained bytes')};
+    await page.locator('#file-input').setInputFiles(retained);
+    const failedBatch = await until(async () => (await api('/api/admin')).batches.find(b => b.files.some(o => o.name === retained.name)), 'retry initial consent');
+    await api(`/api/admin/offer-batches/${failedBatch.id}/approve`, 'POST');
+    await page.locator('#retry').waitFor({state:'visible'});
+    assert.equal(interrupted, true);
+    assert.equal((await fs.readdir(inbox)).includes(retained.name), false);
+    await page.unroute('**/api/files?*', failOnce);
+    await page.locator('#retry').click();
+    const retryBatch = await until(async () => (await api('/api/admin')).batches.find(b => b.id !== failedBatch.id && b.files.some(o => o.name === retained.name)), 'new consent without file reselection');
+    await api(`/api/admin/offer-batches/${retryBatch.id}/approve`, 'POST');
+    await until(async () => (await fs.readdir(inbox)).includes(retained.name), 'retained file uploaded');
+    await until(async () => await page.locator('#queue-list [data-state="completed"]').count() === 1, 'retry saved receipt');
+    assert.deepEqual(await fs.readFile(path.join(inbox, retained.name)), retained.buffer);
     // Outbound download uses the phone's cookie and preserves UTF-8 filename/bytes.
     const outgoingName = 'PC – fotografie č. 1.bin';
     const outgoing = Buffer.from([0,1,2,255,128,64,0,9]);
@@ -118,6 +149,7 @@ async function main() {
     await unsupportedPage.locator('#file-input').setInputFiles({name:'unsupported.txt', mimeType:'text/plain', buffer:Buffer.from('blocked')});
     await delay(200);
     assert.equal((await api('/api/admin')).offers.length, 0);
+    assert.equal((await api('/api/admin')).batches.length, 0);
     const [limitedDownload] = await Promise.all([unsupportedPage.waitForEvent('download'), unsupportedPage.locator('#files a').click()]);
     assert.deepEqual(await fs.readFile(await limitedDownload.path()), outgoing, 'Downloads work without upload capabilities');
     await unsupported.close();
@@ -132,7 +164,7 @@ async function main() {
     await iphonePage.locator('#platform').selectOption('android');
     assert.equal(await iphonePage.locator('#device-name').inputValue(), 'My Android');
     await iphone.close();
-    console.log('PASS: Chromium Android emulation: EN/CS defaults, overrides/custom name, mobile layout, pairing, actual hash-worker upload/approval/cancel, saved bytes/SHA-256, cookie Unicode download; missing Worker/AbortController blocks uploads but permits downloads; iPhone UA defaults. Physical devices/Safari not tested.');
+    console.log('PASS: Chromium Android emulation: EN/CS, mobile layout, pairing, real hash worker, grouped 20-file consent, saved SHA-256, cancellation, retained-file retry with new consent, cookie Unicode download; capability gating; iPhone UA defaults. Physical devices/Safari not tested.');
   } finally {
     await browser?.close();
     if(!exited) { server.kill(); await until(() => exited, 'server shutdown'); }
