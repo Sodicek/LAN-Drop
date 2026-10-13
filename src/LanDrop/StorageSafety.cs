@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Linq;
 using System.Text.Json;
 
 // These checks reject redirections at each boundary. They do not claim to defeat

@@ -156,5 +156,18 @@
   "DiagnosticExportSaved": "Anonymous diagnostic summary saved locally. Nothing was sent.",
   "DiagnosticExportFailed": "Could not save the diagnostic summary. Choose another folder or check folder access.",
   "RecoveryRemoved": "Removed {0} incomplete uploads left by an interrupted run. Completed received files were kept.",
-  "RecoverySkipped": "Some unfinished data was left untouched because it is still in use or could not be safely identified. See the recovery guide."
+  "RecoverySkipped": "Some unfinished data was left untouched because it is still in use or could not be safely identified. See the recovery guide.",
+  "History": "Local completion history",
+  "HistoryEnabled": "Keep local completion history (optional)",
+  "HistoryHelp": "Stores up to 200 file names, sizes, directions and completion times on this PC. No paths or pairing details. Disabling stops new records and keeps existing records. Clearing removes records only; your files are kept. Prepared outgoing files are not proof that the phone saved them. Start sharing to change this preference or clear records.",
+  "HistoryUnavailable": "Local history is unavailable. Sharing can continue; previously loaded records are shown.",
+  "HistoryStopped": "Sharing is stopped. Local records are shown; history is not refreshing.",
+  "HistoryDisabled": "History is off. Existing records are kept; new transfers are not recorded.",
+  "HistoryActive": "History is on. Only completed incoming transfers and outgoing preparation are recorded.",
+  "HistoryEmpty": "No local completion records.",
+  "ClearHistory": "Clear local history records",
+  "HistoryInbound": "Received on PC",
+  "HistoryOutbound": "Prepared for phone",
+  "HistoryLoading": "Loading local history.",
+  "Error_history_unavailable": "Local history is unavailable. Sharing can continue."
 }

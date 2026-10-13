@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0-rc.5 — 2026-10-13
+
+### Added
+- Opt-in local completion history, disabled by default, retaining up to 200 filenames, sizes, directions and timestamps across restarts.
+- Read-only history before sharing starts, separate from current-run activity and download permissions.
+- Disable-with-retention and metadata-only clearing that preserves files and live access.
+- Bounded validated history checkpoints, exclusive writer lease and history-only failure handling.
+- English/Czech history controls and real restart, privacy, clear, concurrency, corruption and 201-completion limit checks.
+
+### Known gaps
+- Outgoing history proves PC preparation, not phone download/storage. A crash between file commit and history commit may leave a completed file without a history row.
+- Queues, sessions and approvals remain current-run only; transfers are not resumable.
+- Physical phone/clean Windows verification, code signing and power-loss durability remain pending.
+
 ## 0.2.0-rc.4 — 2026-10-13
 
 ### Added

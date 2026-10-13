@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-rc.4**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
+Current build: **0.2.0-rc.5**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -40,7 +40,8 @@ Current build: **0.2.0-rc.4**. A release candidate does not mean every release g
 
 ## 0.3.0 — reliable transfers
 - [x] Upload speed and time remaining.
-- [ ] Persistent queue/history.
+- [x] Opt-in local completion history with a 200-record bound and metadata-only clear.
+- [ ] Persistent queue.
 - [ ] Repeat/retry and resumable chunked uploads.
 - [x] Upload checksums, stored-file readback and matching completion receipts.
 - [ ] Independently verified phone downloads and large-file performance measurements.

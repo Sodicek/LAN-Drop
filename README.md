@@ -20,6 +20,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 - English and Czech on Windows and the web; automatic language option and English fallback.
 - Android/iPhone guidance, automatic phone detection with a manual override, and upload capability checks.
 - Current-session transfer states, manual retry of unfinished selections and connection-recovery help.
+- Optional local completion history (off by default), bounded to 200 records and readable after restart; see [history](docs/HISTORY.md) ([česky](docs/cs/HISTORY.md)).
 - Default loopback-only server; optional single selected IPv4 interface for phone access.
 - Upload concurrency and per-run byte/file limits.
 - Manual diagnostic export without addresses, names, paths or secrets; see [diagnostics](docs/DIAGNOSTICS.md) ([česky](docs/cs/DIAGNOSTICS.md)).
@@ -76,7 +77,7 @@ English is the default. Choose **Čeština** or **Automatic** independently on t
 ./scripts/Publish-Portable.ps1
 ```
 
-The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.4-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
+The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.5-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
 
 Run `./scripts/Package-Release.ps1` after publishing to create a ZIP and its SHA-256 checksum. Candidate release notes and the [release test matrix](docs/RELEASE-TEST-MATRIX.md) explain which checks are automated and which still require real phones and clean Windows.
 
@@ -88,6 +89,7 @@ python tests/integration.py
 python tests/batches.py
 python tests/storage_safety.py
 python tests/incoming_recovery.py
+python tests/history.py
 dotnet run --project tests/Transport -c Release
 dotnet run --project tests/Diagnostics -c Release
 python tests/secure_transport.py
@@ -113,7 +115,7 @@ For mobile browser checks, run `npm ci --ignore-scripts`, `npx playwright instal
 ## Known limitations
 
 - HTTPS is implemented with explicit certificate trust. Physical Android/iPhone authority installation, trusted-browser connections and renewal still need practical verification. HTTP preview traffic is unencrypted.
-- No resumable upload or persistent transfer history yet. The current queue lives in the browser tab or Windows app; closing/reloading loses retained selections. Activity holds up to 200 entries for the current server run.
+- No resumable upload or persistent queue yet. Optional completion history retains local metadata only. The current queue lives in the browser tab or Windows app; closing/reloading loses retained selections. Activity holds up to 200 entries for the current server run.
 - Checksums verify the saved PC copy at commit time. They do not encrypt or authenticate HTTP, guarantee survival of power loss, or verify a phone browser download. Later changes to saved files are not automatically detected.
 - Hash preparation reads the source before upload, and the server reads the saved temporary copy again. Large-file performance and real Android/iPhone behavior still need measurement.
 - Incoming batch offers are bound to the device and each file's name/declared size. Pending offers expire after ten minutes and approved batches after two hours. An attempted upload consumes that file's grant even if it fails. Manual retry creates a new request for unfinished files; a lost success response may require checking the PC list to avoid duplicates.

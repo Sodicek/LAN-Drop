@@ -96,6 +96,8 @@ jobs:
         run: python tests/storage_safety.py
       - name: Check incomplete incoming recovery after a process crash
         run: python tests/incoming_recovery.py
+      - name: Check opt-in local history and restart privacy
+        run: python tests/history.py
       - name: Check network profile policy
         run: dotnet run --project tests/NetworkPolicy -c Release
       - name: Smoke test desktop window

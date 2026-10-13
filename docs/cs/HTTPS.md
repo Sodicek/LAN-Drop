@@ -1,6 +1,6 @@
 # Nastavení HTTPS
 
-Ve verzi 0.2.0-rc.4 je ve Windows předvolené HTTPS pro připojení telefonů. Místní správa aplikace používá ověřené spojení pouze uvnitř počítače. Při chybě certifikátu se sdílení samo nepřepne na HTTP.
+Ve verzi 0.2.0-rc.5 je ve Windows předvolené HTTPS pro připojení telefonů. Místní správa aplikace používá ověřené spojení pouze uvnitř počítače. Při chybě certifikátu se sdílení samo nepřepne na HTTP.
 
 1. Vyber privátní/doménové připojení a nech HTTPS zapnuté.
 2. Zadej nové heslo certifikátu alespoň o dvanácti znacích. Vytvoř místní certifikát a vyber nové umístění souboru `.pfx` na PC.

@@ -156,5 +156,18 @@
   "DiagnosticExportSaved": "Anonymní diagnostický přehled byl uložen místně. Nic nebylo odesláno.",
   "DiagnosticExportFailed": "Diagnostický přehled se nepodařilo uložit. Vyber jinou složku nebo zkontroluj přístup do složky.",
   "RecoveryRemoved": "Odstraněno {0} nedokončených přenosů z přerušeného běhu. Dokončené přijaté soubory zůstaly zachované.",
-  "RecoverySkipped": "Některá rozpracovaná data zůstala zachovaná: ještě se používají nebo je nelze bezpečně rozpoznat. Podrobnosti jsou v návodu k zotavení."
+  "RecoverySkipped": "Některá rozpracovaná data zůstala zachovaná: ještě se používají nebo je nelze bezpečně rozpoznat. Podrobnosti jsou v návodu k zotavení.",
+  "History": "Místní historie dokončení",
+  "HistoryEnabled": "Uchovávat místní historii dokončení (volitelné)",
+  "HistoryHelp": "Na tomto PC ukládá až 200 názvů souborů, velikostí, směrů a časů dokončení. Bez cest a údajů párování. Vypnutí zastaví nové záznamy a zachová dosavadní. Vymazání odstraní pouze záznamy; soubory zůstanou. Příprava souboru k odeslání nepotvrzuje jeho uložení v telefonu. Pro změnu nastavení či vymazání záznamů spusť sdílení.",
+  "HistoryUnavailable": "Místní historie není dostupná. Sdílení může pokračovat; zobrazují se dříve načtené záznamy.",
+  "HistoryStopped": "Sdílení je zastavené. Zobrazují se místní záznamy; historie se neobnovuje.",
+  "HistoryDisabled": "Historie je vypnutá. Dosavadní záznamy zůstávají; nové přenosy se nezaznamenávají.",
+  "HistoryActive": "Historie je zapnutá. Zaznamenává se pouze dokončený příjem a příprava souborů pro telefon.",
+  "HistoryEmpty": "Žádné místní záznamy o dokončení.",
+  "ClearHistory": "Vymazat záznamy místní historie",
+  "HistoryInbound": "Přijato do PC",
+  "HistoryOutbound": "Připraveno pro telefon",
+  "HistoryLoading": "Načítání místní historie.",
+  "Error_history_unavailable": "Místní historie není dostupná. Sdílení může pokračovat."
 }

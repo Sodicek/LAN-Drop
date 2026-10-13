@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <Compile Include="../LanDrop/CertificateTools.cs" Link="CertificateTools.cs" />
+    <Compile Include="../LanDrop/TransferHistory.cs" Link="TransferHistory.cs" />
+    <Compile Include="../LanDrop/StorageSafety.cs" Link="StorageSafety.cs" />
     <PackageReference Include="QRCoder" Version="1.7.0" />
     <EmbeddedResource Include="Locales/*.json" />
   </ItemGroup>

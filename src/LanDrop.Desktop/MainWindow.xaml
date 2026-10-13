@@ -54,6 +54,13 @@
   </StackPanel></GroupBox>
   <GroupBox x:Name="FilesGroup"><StackPanel x:Name="FilesPanel"/></GroupBox>
   <GroupBox x:Name="TransfersGroup"><StackPanel><TextBlock x:Name="TransfersHelp"/><Button x:Name="TransferFolderButton" Click="OpenFolder" IsEnabled="False" HorizontalAlignment="Left"/><StackPanel x:Name="TransfersPanel"/></StackPanel></GroupBox>
+  <GroupBox x:Name="HistoryGroup"><StackPanel>
+   <CheckBox x:Name="HistoryEnabled" Checked="HistorySettingChanged" Unchecked="HistorySettingChanged" Foreground="#F3F5F2" Margin="0,0,0,10" IsEnabled="False"/>
+   <TextBlock x:Name="HistoryHelp" Foreground="#A5B1B5"/>
+   <TextBlock x:Name="HistoryStatus" Foreground="#D6B86A" AutomationProperties.LiveSetting="Polite"/>
+   <Button x:Name="ClearHistoryButton" Click="ClearHistory" IsEnabled="False" HorizontalAlignment="Left"/>
+   <StackPanel x:Name="HistoryPanel"/>
+  </StackPanel></GroupBox>
   <TextBlock x:Name="VersionText" Foreground="#A5B1B5"/>
  </StackPanel></ScrollViewer>
 </Window>

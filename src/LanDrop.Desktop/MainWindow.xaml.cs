@@ -51,6 +51,8 @@ public partial class MainWindow : Window
     private int? lastStopExitCode;
     private CancellationTokenSource? transfer;
     private ServerState? lastState;
+    private HistorySnapshot? historyState;
+    private bool renderingHistory, changingHistory, historyRequestFailed;
     private readonly RetainedTransferQueue retryQueue = new();
     private string[] retryPaths => retryQueue.Paths;
     private string? retryRecipient => retryQueue.Recipient;
@@ -75,6 +77,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => {
             if (App.LifecycleTest) { await RunLifecycleTest(); return; }
             if (App.SmokeTest) { Application.Current.Shutdown(0); return; }
+            await LoadStoppedHistory();
             Status.Text = T("Stopped");
         };
         ApplyLanguage();
@@ -120,6 +123,7 @@ public partial class MainWindow : Window
         VersionText.Text = "LAN Drop " + (Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "development");
         if(server is null) Status.Text = T(certificateStatusKey ?? "Stopped");
         if(lastState is not null) RenderState(lastState);
+        RenderHistory();
     }
     private void RefreshNetworks()
     {
@@ -396,11 +400,16 @@ public partial class MainWindow : Window
             await File.WriteAllTextAsync(source,"Desktop integrity lifecycle proof.\n");
             var sourceBytes = await File.ReadAllBytesAsync(source);
             var sourceHash = Convert.ToHexString(SHA256.HashData(sourceBytes)).ToLowerInvariant();
+            if(historyState?.Enabled != false || historyState.Available != true) throw new IOException("History must default to disabled and be available.");
+            await ChangeHistory(HttpMethod.Post,"/api/admin/history/settings",new { enabled = true });
+            if(historyState?.Enabled != true || HistoryEnabled.IsChecked != true) throw new IOException("History preference did not reach desktop.");
             await SendFiles([source]); // Same prehash, upload, and receipt path as file picker/drop.
             await Poll();
             var prepared = lastState!.Files.Single(f => f.Name == Path.GetFileName(source));
             if(!prepared.Verified || prepared.Sha256 != sourceHash || prepared.Size != sourceBytes.Length || Status.Text != T("ReadyForPhone"))
                 throw new IOException("Desktop upload integrity was not confirmed.");
+            if(historyState?.Entries?.SingleOrDefault(h => h.Name == Path.GetFileName(source)) is not { Direction: "outgoing" } historyEntry || historyEntry.Size != sourceBytes.Length || !HistoryPanel.Children.OfType<TextBlock>().Any(t => t.Text.Contains(Path.GetFileName(source),StringComparison.Ordinal)))
+                throw new IOException("Completed outgoing preparation did not render in local history.");
             using(var download = new HttpRequestMessage(HttpMethod.Get,baseUrl + "/api/files/" + prepared.Id))
             {
                 download.Headers.Add("X-LanDrop-Session",session);
@@ -471,6 +480,36 @@ public partial class MainWindow : Window
             }
             await StopServer();
             if(server is not null || lastStopExitCode != 0) throw new IOException("Server did not stop gracefully.");
+            if(historyState?.Entries?.Any(h => h.Name == Path.GetFileName(source)) != true || HistoryEnabled.IsEnabled || ClearHistoryButton.IsEnabled || HistoryStatus.Text != T("HistoryStopped"))
+                throw new IOException("Stopped desktop did not load local history without enabling sharing controls.");
+            LanguagePicker.SelectedValue = "cs";
+            if(!HistoryPanel.Children.OfType<TextBlock>().Any(t => t.Text.Contains(T("HistoryOutbound"),StringComparison.Ordinal))) throw new IOException("History did not follow selected language.");
+            LanguagePicker.SelectedValue = "en";
+            await StartServer(); timer.Stop();
+            if(historyState?.Enabled != true || historyState.Entries?.Any(h => h.Name == Path.GetFileName(source)) != true)
+                throw new IOException("Local completion history did not survive server restart.");
+            await ChangeHistory(HttpMethod.Post,"/api/admin/history/settings",new { enabled = false });
+            var retainedHistoryCount = historyState!.Entries!.Length;
+            if(historyState.Enabled || retainedHistoryCount == 0) throw new IOException("Disabling history removed existing records.");
+            var restartedQr = await Api("/api/admin/qr?address=127.0.0.1");
+            var restartedPair = await PhoneApi("/api/pair",HttpMethod.Post,new { code = restartedQr.GetProperty("link").GetString()!.Split("#pair=")[1], name = "History test phone" });
+            session = restartedPair.GetProperty("token").GetString();
+            await Poll();
+            var restartedDevice = lastState!.Devices.Single(d => d.Name == "History test phone");
+            await Api($"/api/admin/devices/{restartedDevice.Id}/approve",HttpMethod.Post); await Poll();
+            await SendFiles([source]); await Poll();
+            if(historyState!.Entries!.Length != retainedHistoryCount) throw new IOException("Disabled history recorded a transfer.");
+            var retainedPrepared = lastState!.Files.Single(f => f.Name == Path.GetFileName(source));
+            await ChangeHistory(HttpMethod.Delete,"/api/admin/history");
+            if(historyState!.Entries!.Length != 0) throw new IOException("History clear did not remove metadata.");
+            using(var preservedDownload = new HttpRequestMessage(HttpMethod.Get,baseUrl + "/api/files/" + retainedPrepared.Id))
+            {
+                preservedDownload.Headers.Add("X-LanDrop-Session",session);
+                using var response = await http.SendAsync(preservedDownload);
+                response.EnsureSuccessStatusCode();
+                if(!(await response.Content.ReadAsByteArrayAsync()).SequenceEqual(sourceBytes)) throw new IOException("History clear changed a shared file.");
+            }
+            await StopServer();
             const string testPassword = "Isolated lifecycle test password 42!";
             var certificate = await Task.Run(() => CertificateTools.Generate(Path.Combine(dataDirectory,"lifecycle.pfx"),"127.0.0.1",testPassword));
             var wrongAddress = await Task.Run(() => CertificateTools.Generate(Path.Combine(dataDirectory,"wrong-address.pfx"),"127.0.0.2",testPassword));
@@ -516,7 +555,7 @@ public partial class MainWindow : Window
             await CheckSharingNetwork();
             if(server is not null || Status.Text != T("CertificateExpiredStopped")) throw new IOException("Expired certificate did not stop sharing.");
             if(server is not null || lastStopExitCode != 0) throw new IOException("Secure server did not stop gracefully.");
-            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, BatchesApproved = true, BatchesRejected = true, RetryWithoutDuplicates = true, TransfersRendered = true, OutboundVerified = true, SecureStarted = true, SecureQr = true, InvalidCertificateBlocked = true, SecretNotPersisted = true, SecureDefaultMigrated = true, CertificatePreflight = true, CertificateDetailsRestored = true, CertificateStatusLocalized = true, CertificateInputInvalidated = true, CertificateExpiryStops = true, DiagnosticExportPrivate = true, ServerExitCode = lastStopExitCode }));
+            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, BatchesApproved = true, BatchesRejected = true, RetryWithoutDuplicates = true, TransfersRendered = true, OutboundVerified = true, SecureStarted = true, SecureQr = true, InvalidCertificateBlocked = true, SecretNotPersisted = true, SecureDefaultMigrated = true, CertificatePreflight = true, CertificateDetailsRestored = true, CertificateStatusLocalized = true, CertificateInputInvalidated = true, CertificateExpiryStops = true, DiagnosticExportPrivate = true, HistoryRendered = true, HistoryRestored = true, HistoryDisabledRetains = true, HistoryClearKeepsFiles = true, ServerExitCode = lastStopExitCode }));
             result = 0;
         }
         catch(Exception ex)
@@ -599,9 +638,73 @@ public partial class MainWindow : Window
             if(currentGeneration != generation || stopping || server is null) return;
             lastState = json.Deserialize<ServerState>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             if(lastState is not null) { inbox = lastState.Inbox; RenderState(lastState); }
+            await PollHistory(currentGeneration);
         }
         catch(Exception ex) when(ex is IOException or HttpRequestException or JsonException or OperationCanceledException) { if(currentGeneration == generation && !stopping && server is not null) Status.Text = T("ConnectionLost"); }
         finally { polling = false; }
+    }
+    private async Task PollHistory(int currentGeneration)
+    {
+        try
+        {
+            var json = await Api("/api/admin/history");
+            if(currentGeneration != generation || stopping || server is null) return;
+            var loaded = json.Deserialize<HistorySnapshot>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if(loaded is not null) { historyState = loaded; historyRequestFailed = false; }
+        }
+        catch(Exception ex) when(ex is IOException or HttpRequestException or JsonException or OperationCanceledException)
+        {
+            if(currentGeneration != generation || stopping || server is null) return;
+            historyRequestFailed = true;
+        }
+        RenderHistory();
+    }
+    private void RenderHistory()
+    {
+        HistoryGroup.Header = T("History"); HistoryEnabled.Content = T("HistoryEnabled");
+        HistoryHelp.Text = T("HistoryHelp"); ClearHistoryButton.Content = T("ClearHistory");
+        renderingHistory = true; HistoryEnabled.IsChecked = historyState?.Enabled == true; renderingHistory = false;
+        var available = server is not null && !stopping && historyState?.Available == true && !historyRequestFailed;
+        HistoryEnabled.IsEnabled = available && !changingHistory;
+        ClearHistoryButton.IsEnabled = available && !changingHistory && historyState?.Entries?.Length > 0;
+        HistoryStatus.Text = T(server is null ? (historyState is null ? "HistoryLoading" : historyState.Available && !historyRequestFailed ? "HistoryStopped" : "HistoryUnavailable") :
+            historyRequestFailed || historyState?.Available == false ? "HistoryUnavailable" : historyState?.Enabled == true ? "HistoryActive" : "HistoryDisabled");
+        HistoryPanel.Children.Clear();
+        var records = historyState?.Entries?.OrderByDescending(e => e.CompletedAt).Take(200).ToArray() ?? [];
+        if(records.Length == 0) HistoryPanel.Children.Add(new TextBlock { Text = T("HistoryEmpty") });
+        var culture = CultureInfo.GetCultureInfo(settings.Language == "cs" || (settings.Language == "auto" && CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "cs") ? "cs" : "en");
+        foreach(var entry in records)
+            HistoryPanel.Children.Add(new TextBlock { Text = $"{entry.Name} · {entry.Size.ToString("N0",culture)} B · {T(entry.Direction == "incoming" ? "HistoryInbound" : "HistoryOutbound")} · {entry.CompletedAt.ToLocalTime().ToString("g",culture)}" });
+    }
+    private async Task LoadStoppedHistory()
+    {
+        var currentGeneration = generation;
+        var snapshot = await Task.Run(() => TransferHistory.ReadOnlySnapshot(dataDirectory));
+        if(currentGeneration != generation || server is not null) return;
+        if(snapshot.Available || historyState is null) historyState = snapshot;
+        historyRequestFailed = !snapshot.Available;
+        RenderHistory();
+    }
+    private async void HistorySettingChanged(object sender, RoutedEventArgs e)
+    {
+        if(renderingHistory || changingHistory || server is null || stopping || historyState?.Available != true || historyRequestFailed) return;
+        await ChangeHistory(HttpMethod.Post,"/api/admin/history/settings",new { enabled = HistoryEnabled.IsChecked == true });
+    }
+    private async void ClearHistory(object sender, RoutedEventArgs e)
+    {
+        if(changingHistory || server is null || stopping || historyState?.Available != true || historyRequestFailed) return;
+        await ChangeHistory(HttpMethod.Delete,"/api/admin/history");
+    }
+    private async Task ChangeHistory(HttpMethod method,string path,object? body = null)
+    {
+        var currentGeneration = generation;
+        changingHistory = true; HistoryEnabled.IsEnabled = ClearHistoryButton.IsEnabled = false;
+        try { await Api(path,method,body); await PollHistory(currentGeneration); }
+        catch(Exception ex) when(ex is IOException or HttpRequestException or JsonException)
+        {
+            if(currentGeneration == generation && server is not null && !stopping) historyRequestFailed = true;
+        }
+        finally { changingHistory = false; RenderHistory(); }
     }
     private void RenderState(ServerState state)
     {
@@ -828,7 +931,7 @@ public partial class MainWindow : Window
         TransferFolderButton.IsEnabled = false; UpdateRetry();
         StartButton.IsEnabled = Network.IsEnabled = true; StopButton.IsEnabled = ChooseFolderButton.IsEnabled = OpenFolderButton.IsEnabled = NewQrButton.IsEnabled = SendButton.IsEnabled = CopyLinkButton.IsEnabled = false;
         Status.Text = T("Stopped"); stopping = false;
-        secureSharing = false; runningCertificateExpiry = null; UpdateTransportControls();
+        secureSharing = false; runningCertificateExpiry = null; UpdateTransportControls(); await LoadStoppedHistory();
     }
     private async void ClosingWindow(object? sender,CancelEventArgs e)
     {

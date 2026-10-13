@@ -78,6 +78,7 @@ StorageSafety.CreateFolder(inbox);
 var outboxLease = StorageSafety.CreateRunLease(outbox);
 using var incomingStorage = new IncomingStorage();
 incomingStorage.Prepare(inbox);
+using var transferHistory = new TransferHistory(storage);
 bool IsAdmin(HttpContext c) => c.Connection.RemoteIpAddress is { } remote && IPAddress.IsLoopback(remote) && c.Request.Headers["X-LanDrop-Admin"] == admin;
 Device? GetDevice(HttpContext c) => sessions.TryGetValue(c.Request.Headers["X-LanDrop-Session"].ToString(), out var d) && d.Expires > DateTimeOffset.UtcNow ? d : null;
 bool Allowed(HttpContext c) => IsAdmin(c) || GetDevice(c)?.Approved == true;
@@ -166,6 +167,11 @@ app.MapGet("/api/admin", (HttpContext c) =>
     }
 });
 app.MapPost("/api/admin/shutdown", (HttpContext c) => { if (!IsAdmin(c)) return Results.Unauthorized(); c.Response.OnCompleted(() => { app.Lifetime.StopApplication(); return Task.CompletedTask; }); return Results.Ok(); });
+app.MapGet("/api/admin/history", (HttpContext c) => !IsAdmin(c) ? Results.Unauthorized() : Results.Ok(transferHistory.Snapshot()));
+app.MapPost("/api/admin/history/settings", (HttpContext c, HistorySettingsRequest request) =>
+    !IsAdmin(c) ? Results.Unauthorized() : transferHistory.SetEnabled(request.Enabled) ? Results.Ok(transferHistory.Snapshot()) : Results.Json(Error("history_unavailable", "Local history is unavailable. Sharing can continue."), statusCode: 409));
+app.MapDelete("/api/admin/history", (HttpContext c) =>
+    !IsAdmin(c) ? Results.Unauthorized() : transferHistory.Clear() ? Results.Ok(transferHistory.Snapshot()) : Results.Json(Error("history_unavailable", "Local history is unavailable. Sharing can continue."), statusCode: 409));
 app.MapPost("/api/admin/pairing", (HttpContext c) => { if (!IsAdmin(c)) return Results.Unauthorized(); lock (gate) {
     pairing = Secret(); pairingExpires = DateTimeOffset.UtcNow.AddMinutes(10);
     foreach (var pending in sessions.Where(s => !s.Value.Approved).ToArray())
@@ -445,6 +451,7 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
         try { File.Move(temp, final); } catch (IOException) when (File.Exists(final)) { final = Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(name)}-{id}{Path.GetExtension(name)}"); File.Move(temp, final); }
         var file = new SharedFile(id, Path.GetFileName(final), final, size, local ? "outbound" : "inbound", owner.Id, checksum.ToLowerInvariant()); files[id] = file; committed = true;
         transfer = transfer with { Status = "completed", BytesTransferred = size, Updated = DateTimeOffset.UtcNow, FileId = file.Id }; Track(transfer);
+        transferHistory.Record(file.Name, file.Size, local ? "outgoing" : "incoming");
         return Results.Ok(new { file.Id, file.Name, file.Size, file.Sha256, verified = true, transferId = transfer.Id });
     }
     catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { transfer = transfer with { Status = "cancelled", Updated = DateTimeOffset.UtcNow, ErrorCode = "transfer_cancelled" }; Track(transfer); return Results.Json(Error("transfer_cancelled", "The transfer was cancelled."), statusCode: 409); }
@@ -482,6 +489,7 @@ app.Lifetime.ApplicationStarted.Register(() => { var url = $"http://127.0.0.1:{p
 app.Lifetime.ApplicationStopped.Register(() => { incomingStorage.Dispose(); outboxLease.Dispose(); try { StorageSafety.CleanupRun(outbox); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or UnsafeStorageException or JsonException) { } });
 app.Run();
 record PairRequest(string Code, string? Name);
+record HistorySettingsRequest([property: System.Text.Json.Serialization.JsonRequired] bool Enabled);
 record FolderRequest(string Path);
 record Device(string Id, string Name, bool Approved, DateTimeOffset Expires, CancellationTokenSource Cancellation);
 record SharedFile(string Id, string Name, string Path, long Size, string Direction, string RecipientId, string Sha256);

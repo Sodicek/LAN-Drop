@@ -47,6 +47,8 @@ with tempfile.TemporaryDirectory(prefix="landrop-desktop-") as directory:
     assert evidence["CertificatePreflight"] is True and evidence["CertificateDetailsRestored"] is True
     assert evidence["CertificateStatusLocalized"] is True and evidence["CertificateInputInvalidated"] is True
     assert evidence["CertificateExpiryStops"] is True and evidence["DiagnosticExportPrivate"] is True
+    assert evidence["HistoryRendered"] is True and evidence["HistoryRestored"] is True
+    assert evidence["HistoryDisabledRetains"] is True and evidence["HistoryClearKeepsFiles"] is True
     assert evidence["ServerExitCode"] == 0
     assert not list((data / "Outbox").glob("*"))
-    print("PASS: native HTTP/HTTPS lifecycle, localized certificate preflight and recovered public details, input invalidation, expiry shutdown, private diagnostic export, password non-persistence, consent, verified transfers, retry and owned cleanup.")
+    print("PASS: native HTTP/HTTPS lifecycle, localized certificate preflight and recovered public details, input invalidation, expiry shutdown, private diagnostic export, password non-persistence, consent, verified transfers, retry, persistent opt-in history, metadata-only clear and owned cleanup.")
