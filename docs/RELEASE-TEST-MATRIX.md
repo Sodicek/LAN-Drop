@@ -11,10 +11,11 @@
 | Local certificate generation, validity/private key/EKU/SAN checks and rollback | Windows development host | Passed: `dotnet run --project tests/Transport -c Release` |
 | Certificate inspection, actionable status and verified companion authority | Isolated local certificate fixtures | Automated: `tests/Transport`; no network downloads or trust changes |
 | Manual diagnostic summary privacy | Typed report helper and native window | Automated: `tests/Diagnostics` and desktop lifecycle; explicit field whitelist |
+| Appearance preferences, tested contrast, localized names and polling focus | Native palette/lifecycle and Chromium/WebKit emulation | Automated: `tests/theme.cjs`, `tests/mobile_browser.cjs` and desktop lifecycle, with screenshots; not full accessibility certification |
 | Opt-in completion history, restart, grants isolation, metadata-only clear, 200-record cap and unsafe/corrupt store preservation | Real isolated server processes and native window | Passed: `python tests/history.py` and desktop lifecycle; history is local metadata, not phone-save confirmation |
 | Chromium phone profile over trusted HTTPS | Disposable Windows GitHub Actions runner | Automated: `tests/Run-TrustedBrowser.ps1`; CI-only test root is removed afterward; no local trust mutation |
 | Native window and child-server startup/shutdown | Windows development host and CI | Automated desktop smoke and lifecycle checks |
-| Self-contained portable package lifecycle | Windows development host with SDK/runtime discovery removed from PATH and DOTNET_ROOT | Passed: `python tests/desktop_lifecycle.py --executable publish/LAN-Drop-0.2.0-rc.5-win-x64/LanDrop.Desktop.exe --without-sdk`, including HTTPS preflight, expiry shutdown and private diagnostics; does not replace a clean-machine test |
+| Self-contained portable package lifecycle | Windows development host with SDK/runtime discovery removed from PATH and DOTNET_ROOT | Passed: `python tests/desktop_lifecycle.py --executable publish/LAN-Drop-0.2.0-rc.6-win-x64/LanDrop.Desktop.exe --without-sdk`, including HTTPS preflight, expiry shutdown and private diagnostics; does not replace a clean-machine test |
 | Safe storage paths, disk shortage, stale outbox ownership | Windows development host and CI | Automated: `python tests/storage_safety.py` |
 | Incoming partial upload, forced process termination/restart, preserved completed files and live leases | Real isolated Windows server processes | Passed: `python tests/incoming_recovery.py`; includes folder switching, same-folder retry and malformed/foreign/nested/linked/locked preservation; not power-loss testing |
 | Android Chrome on a real phone | Private LAN and Windows PC | **Not run; release gate** |
@@ -23,6 +24,7 @@
 | Firewall denies inbound traffic; correct help and recovery | Clean Windows and physical phone | **Not run** |
 | PC sleep/wake, Wi-Fi switch, phone background/foreground | Physical devices | **Not run** |
 | Phone authority installation, trusted HTTPS and renewal | Physical Android Chrome and iPhone Safari | **Not run; release gate** |
+| Screen readers, custom Windows contrast, large text/DPI and complete keyboard workflows | Actual Windows Narrator/NVDA, Android TalkBack and iOS VoiceOver | **Not run**; see [appearance/accessibility scope](APPEARANCE-ACCESSIBILITY.md) |
 
 ## Physical-device acceptance procedure
 

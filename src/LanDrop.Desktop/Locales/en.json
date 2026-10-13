@@ -169,5 +169,12 @@
   "HistoryInbound": "Received on PC",
   "HistoryOutbound": "Prepared for phone",
   "HistoryLoading": "Loading local history.",
-  "Error_history_unavailable": "Local history is unavailable. Sharing can continue."
+  "Error_history_unavailable": "Local history is unavailable. Sharing can continue.",
+  "Theme": "Appearance",
+  "ThemeSystem": "System",
+  "ThemeLight": "Light",
+  "ThemeDark": "Dark",
+  "Language": "Language",
+  "PairingQr": "Pairing QR code",
+  "TransferProgress": "File transfer progress"
 }

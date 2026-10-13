@@ -18,6 +18,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 - Streaming to disk with duplicate-name protection, Windows filename checks and owned incoming staging recovery after a process crash; see [recovery](docs/RECOVERY.md) ([česky](docs/cs/RECOVERY.md)).
 - Destination folder dialog, persistent folder/network/language preferences and notification-area access.
 - English and Czech on Windows and the web; automatic language option and English fallback.
+- System/Light/Dark appearance, keyboard focus retention and contextual accessible action names; see [appearance and keyboard access](docs/APPEARANCE-ACCESSIBILITY.md) ([česky](docs/cs/APPEARANCE-ACCESSIBILITY.md)).
 - Android/iPhone guidance, automatic phone detection with a manual override, and upload capability checks.
 - Current-session transfer states, manual retry of unfinished selections and connection-recovery help.
 - Optional local completion history (off by default), bounded to 200 records and readable after restart; see [history](docs/HISTORY.md) ([česky](docs/cs/HISTORY.md)).
@@ -77,7 +78,7 @@ English is the default. Choose **Čeština** or **Automatic** independently on t
 ./scripts/Publish-Portable.ps1
 ```
 
-The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.5-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
+The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.6-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
 
 Run `./scripts/Package-Release.ps1` after publishing to create a ZIP and its SHA-256 checksum. Candidate release notes and the [release test matrix](docs/RELEASE-TEST-MATRIX.md) explain which checks are automated and which still require real phones and clean Windows.
 
@@ -94,6 +95,7 @@ dotnet run --project tests/Transport -c Release
 dotnet run --project tests/Diagnostics -c Release
 python tests/secure_transport.py
 node tests/localization.cjs
+node tests/theme.cjs
 node tests/progress.cjs
 node tests/offers.cjs
 node tests/integrity.cjs

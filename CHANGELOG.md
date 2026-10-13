@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0-rc.6 — 2026-10-13
+
+### Added
+- Independent persisted System/Light/Dark appearance on Windows and in the browser, with English/Czech names and live System updates.
+- Semantic light/dark palettes, visible keyboard focus and system high-contrast/forced-colors handling.
+- Localized native automation names, contextual repeated actions and browser progress names/values.
+- Keyboard focus retention and expanded browser batch details across polling updates.
+- Existing completion notices/history labels update when switching browser language.
+- Native/browser theme, selected contrast, localization, persistence and focus checks with CI screenshots.
+
+### Known gaps
+- Actual screen readers, phone assistive technology, custom Windows contrast themes, large text/DPI and full keyboard/accessibility audits remain unverified.
+- Physical phones, clean Windows and signing still gate stable distribution; themes do not change transport or transfer limits.
+
 ## 0.2.0-rc.5 — 2026-10-13
 
 ### Added

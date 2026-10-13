@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-rc.5**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
+Current build: **0.2.0-rc.6**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -36,7 +36,8 @@ Current build: **0.2.0-rc.5**. A release candidate does not mean every release g
 - [x] Certificate preflight, expiry warnings and verified public authority details after restart.
 - [x] Strict TLS integration checks and Chromium/WebKit emulation with exact Unicode download names.
 - [ ] Shared Core/Transport modules and typed client.
-- [ ] Theme selection and full accessibility verification.
+- [x] Persisted System/Light/Dark appearance, tested palette contrast, localized names and polling focus retention.
+- [ ] Full accessibility/screen-reader/keyboard/large text verification on real devices.
 
 ## 0.3.0 — reliable transfers
 - [x] Upload speed and time remaining.

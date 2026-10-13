@@ -17,6 +17,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Automation;
+using System.Windows.Media;
+using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -31,7 +34,7 @@ public partial class MainWindow : Window
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromHours(4) };
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer networkTimer = new() { Interval = TimeSpan.FromSeconds(15) };
-    private bool checkingNetwork;
+    private bool checkingNetwork, renderingTheme;
     private readonly Forms.NotifyIcon tray = new() { Icon = System.Drawing.SystemIcons.Application, Text = "LAN Drop" };
     private readonly Dictionary<string, string> english;
     private Dictionary<string, string> translations;
@@ -64,6 +67,10 @@ public partial class MainWindow : Window
         Recipient.SelectionChanged += (_,_) => { if(!renderingState && !uploading && Recipient.SelectedValue is string) retryTargetExplicitlySelected = true; };
         english = LoadLanguage("en"); translations = english;
         try { if (!App.SmokeTest && File.Exists(settingsPath)) settings = JsonSerializer.Deserialize<DesktopSettings>(File.ReadAllText(settingsPath)) ?? new(); } catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
+        settings = settings with { Theme = DesktopTheme.Normalize(settings.Theme) };
+        DesktopTheme.Apply(Resources,settings.Theme);
+        SystemEvents.UserPreferenceChanged += SystemPreferenceChanged;
+        Closed += (_,_) => SystemEvents.UserPreferenceChanged -= SystemPreferenceChanged;
         CertificatePath.Text = settings.CertificatePath ?? "";
         SecureHttps.IsChecked = settings.SecureHttps;
         LanguagePicker.ItemsSource = new[] { new LanguageChoice("en", "English"), new LanguageChoice("cs", "Čeština"), new LanguageChoice("auto", "Automatic / Automaticky") };
@@ -104,8 +111,28 @@ public partial class MainWindow : Window
         try { if (!App.SmokeTest && !App.LifecycleTest) SaveSettings(); } catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { Status.Text = T("OperationFailed"); }
         ApplyLanguage();
     }
+    private void ThemeChanged(object sender,SelectionChangedEventArgs e)
+    {
+        if(renderingTheme || english is null || ThemePicker.SelectedValue is not string choice) return;
+        settings = settings with { Theme = DesktopTheme.Normalize(choice) };
+        DesktopTheme.Apply(Resources,settings.Theme);
+        try { if(!App.SmokeTest && !App.LifecycleTest) SaveSettings(); }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { Status.Text = T("OperationFailed"); }
+    }
+    private void SystemPreferenceChanged(object sender,UserPreferenceChangedEventArgs e)
+    {
+        if(Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+        _ = Dispatcher.BeginInvoke(() => { if(!closing) DesktopTheme.Apply(Resources,settings.Theme); });
+    }
     private void ApplyLanguage()
     {
+        renderingTheme = true;
+        ThemeLabel.Text = T("Theme");
+        ThemePicker.ItemsSource = new[] { new LanguageChoice("system",T("ThemeSystem")),new LanguageChoice("light",T("ThemeLight")),new LanguageChoice("dark",T("ThemeDark")) };
+        ThemePicker.DisplayMemberPath = "Name"; ThemePicker.SelectedValuePath = "Code"; ThemePicker.SelectedValue = settings.Theme;
+        renderingTheme = false;
+        foreach(var named in new (DependencyObject Control,string Key)[] { (LanguagePicker,"Language"),(ThemePicker,"Theme"),(Network,"NetworkLabel"),(Recipient,"Recipient"),(CertificatePath,"CertificateLabel"),(CertificatePassword,"CertificatePasswordLabel"),(QrImage,"PairingQr"),(UploadProgress,"TransferProgress") })
+            AutomationProperties.SetName(named.Control,T(named.Key));
         RefreshNetworks();
         Subtitle.Text = T("Subtitle"); SecurityNote.Text = T("SecurityNote"); NetworkLabel.Text = T("NetworkLabel");
         ConnectionGroup.Header = T("Connect"); FolderGroup.Header = T("Folder"); DevicesGroup.Header = T("Devices");
@@ -365,12 +392,76 @@ public partial class MainWindow : Window
         catch(Exception ex) when(ex is IOException or InvalidOperationException or TimeoutException or HttpRequestException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         { await StopServer(); Status.Text = T("ServerFailed"); }
     }
+    private async Task VerifyThemeAndAutomation()
+    {
+        if(DesktopTheme.Normalize(JsonSerializer.Deserialize<DesktopSettings>("{}")?.Theme) != "system" || DesktopTheme.Normalize("unknown") != "system")
+            throw new IOException("Theme preference migration failed.");
+        Color BrushColor(string key) => ((SolidColorBrush)Resources[key]).Color;
+        var expected = new ResourceDictionary(); DesktopTheme.Apply(expected,settings.Theme);
+        if(ThemePicker.SelectedValue as string != settings.Theme || ((SolidColorBrush)Background).Color != ((SolidColorBrush)expected["WindowBrush"]).Color)
+            throw new IOException("Loaded theme preference was not applied to the window.");
+        static double Luminance(Color c)
+        {
+            static double Linear(byte b) { var x = b / 255d; return x <= .04045 ? x / 12.92 : Math.Pow((x + .055) / 1.055,2.4); }
+            return .2126 * Linear(c.R) + .7152 * Linear(c.G) + .0722 * Linear(c.B);
+        }
+        void CheckContrast(string foreground,string background)
+        {
+            var a = Luminance(BrushColor(foreground)); var b = Luminance(BrushColor(background));
+            if((Math.Max(a,b) + .05) / (Math.Min(a,b) + .05) < 4.5) throw new IOException("Insufficient theme text contrast: " + foreground);
+        }
+        foreach(var theme in new[] { "light","dark" })
+        {
+            ThemePicker.SelectedValue = theme;
+            if(settings.Theme != theme) throw new IOException("Theme picker did not apply preference.");
+            SaveSettings();
+            if(JsonSerializer.Deserialize<DesktopSettings>(File.ReadAllText(settingsPath))?.Theme != theme)
+                throw new IOException("Theme preference not persisted.");
+            DesktopTheme.Apply(Resources,theme,false);
+            foreach(var key in new[] { "TextBrush","MutedBrush","WarningBrush","AccentBrush","DisabledTextBrush" }) CheckContrast(key,"WindowBrush");
+            CheckContrast("ButtonTextBrush","ButtonBrush"); CheckContrast("ButtonHoverTextBrush","ButtonHoverBrush");
+            await Dispatcher.InvokeAsync(() => { },DispatcherPriority.Render);
+            UpdateLayout();
+            var surface = (FrameworkElement)Content;
+            var width = (int)Math.Ceiling(surface.ActualWidth); var height = (int)Math.Ceiling(surface.ActualHeight);
+            var visual = new DrawingVisual();
+            using(var drawing = visual.RenderOpen())
+            {
+                // Content is transparent; paint the actual window background before rendering our own controls.
+                drawing.DrawRectangle(Background,null,new Rect(0,0,width,height));
+                var bounds = new Rect(0,0,surface.ActualWidth,surface.ActualHeight);
+                var contentBrush = new VisualBrush(surface) { ViewboxUnits = BrushMappingMode.Absolute, Viewbox = bounds, ViewportUnits = BrushMappingMode.Absolute, Viewport = bounds, Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top };
+                drawing.DrawRectangle(contentBrush,null,bounds);
+            }
+            var bitmap = new RenderTargetBitmap(width,height,96,96,PixelFormats.Pbgra32);
+            bitmap.Render(visual);
+            var pixels = new byte[width * height * 4]; bitmap.CopyPixels(pixels,width * 4,0);
+            for(var i = 3; i < pixels.Length; i += 4) if(pixels[i] != 255) throw new IOException("Window screenshot contains transparent pixels.");
+            var background = ((SolidColorBrush)Background).Color;
+            if(pixels[0] != background.B || pixels[1] != background.G || pixels[2] != background.R) throw new IOException("Screenshot background does not match the actual window.");
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var file = File.Create(Path.Combine(dataDirectory,"desktop-" + theme + ".png")); encoder.Save(file);
+        }
+        DesktopTheme.Apply(Resources,"system",false,true); var lightBackground = BrushColor("WindowBrush");
+        DesktopTheme.Apply(Resources,"system",false,false);
+        if(BrushColor("WindowBrush") == lightBackground) throw new IOException("System appearance did not change palette.");
+        DesktopTheme.Apply(Resources,"dark",true);
+        if(BrushColor("WindowBrush") != SystemColors.WindowColor || BrushColor("TextBrush") != SystemColors.WindowTextColor || BrushColor("ButtonHoverTextBrush") != SystemColors.HighlightTextColor)
+            throw new IOException("High contrast did not override manual theme.");
+        LanguagePicker.SelectedValue = "cs";
+        foreach(var named in new (DependencyObject Control,string Key)[] { (LanguagePicker,"Language"),(ThemePicker,"Theme"),(Network,"NetworkLabel"),(Recipient,"Recipient"),(CertificatePath,"CertificateLabel"),(CertificatePassword,"CertificatePasswordLabel"),(QrImage,"PairingQr"),(UploadProgress,"TransferProgress") })
+            if(AutomationProperties.GetName(named.Control) != T(named.Key) || T(named.Key) == english[named.Key]) throw new IOException("Automation name did not localize: " + named.Key);
+        LanguagePicker.SelectedValue = "en";
+        ThemePicker.SelectedValue = "system";
+        DesktopTheme.Apply(Resources,settings.Theme);
+    }
     private async Task RunLifecycleTest()
     {
         var result = 1;
         try
         {
             if(App.TestDataDirectory is null) throw new IOException("Explicit test directory required.");
+            await VerifyThemeAndAutomation();
             SecureHttps.IsChecked = false;
             Network.SelectedValue = "127.0.0.1";
             await StartServer();
@@ -393,6 +484,15 @@ public partial class MainWindow : Window
             session = paired.GetProperty("token").GetString();
             await Poll();
             var device = lastState!.Devices.Single(d => d.Name == "Desktop lifecycle phone");
+            var beforeFocus = ButtonsIn(DevicesPanel).First(b => AutomationProperties.GetAutomationId(b) == "device-approve-" + device.Id);
+            if(!beforeFocus.Focus()) throw new IOException("Could not focus fixture device action.");
+            await Poll();
+            var afterFocus = ButtonsIn(DevicesPanel).First(b => AutomationProperties.GetAutomationId(b) == "device-approve-" + device.Id);
+            if(ReferenceEquals(beforeFocus,afterFocus) || Keyboard.FocusedElement != afterFocus) throw new IOException("Polling lost device action keyboard focus.");
+            LanguagePicker.SelectedValue = "cs";
+            if(AutomationProperties.GetName(ButtonsIn(DevicesPanel).First(b => AutomationProperties.GetAutomationId(b) == "device-approve-" + device.Id)) != T("Approve") + " · " + device.Name)
+                throw new IOException("Device action automation name did not localize.");
+            LanguagePicker.SelectedValue = "en";
             await Api($"/api/admin/devices/{device.Id}/approve",HttpMethod.Post);
             await Poll();
             Recipient.SelectedValue = device.Id;
@@ -555,7 +655,7 @@ public partial class MainWindow : Window
             await CheckSharingNetwork();
             if(server is not null || Status.Text != T("CertificateExpiredStopped")) throw new IOException("Expired certificate did not stop sharing.");
             if(server is not null || lastStopExitCode != 0) throw new IOException("Secure server did not stop gracefully.");
-            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, BatchesApproved = true, BatchesRejected = true, RetryWithoutDuplicates = true, TransfersRendered = true, OutboundVerified = true, SecureStarted = true, SecureQr = true, InvalidCertificateBlocked = true, SecretNotPersisted = true, SecureDefaultMigrated = true, CertificatePreflight = true, CertificateDetailsRestored = true, CertificateStatusLocalized = true, CertificateInputInvalidated = true, CertificateExpiryStops = true, DiagnosticExportPrivate = true, HistoryRendered = true, HistoryRestored = true, HistoryDisabledRetains = true, HistoryClearKeepsFiles = true, ServerExitCode = lastStopExitCode }));
+            File.WriteAllText(Path.Combine(dataDirectory, "lifecycle-test.json"), JsonSerializer.Serialize(new { Started = true, Stopped = true, OffersApproved = true, OffersRejected = true, BatchesApproved = true, BatchesRejected = true, RetryWithoutDuplicates = true, TransfersRendered = true, OutboundVerified = true, SecureStarted = true, SecureQr = true, InvalidCertificateBlocked = true, SecretNotPersisted = true, SecureDefaultMigrated = true, CertificatePreflight = true, CertificateDetailsRestored = true, CertificateStatusLocalized = true, CertificateInputInvalidated = true, CertificateExpiryStops = true, DiagnosticExportPrivate = true, HistoryRendered = true, HistoryRestored = true, HistoryDisabledRetains = true, HistoryClearKeepsFiles = true, ThemesChanged = true, SystemFallback = true, ThemePersisted = true, AutomationLocalized = true, DynamicFocusRetained = true, ThemeContrast = true, HighContrastPalette = true, ServerExitCode = lastStopExitCode }));
             result = 0;
         }
         catch(Exception ex)
@@ -706,8 +806,19 @@ public partial class MainWindow : Window
         }
         finally { changingHistory = false; RenderHistory(); }
     }
+    private static IEnumerable<Button> ButtonsIn(DependencyObject parent)
+    {
+        for(var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent,i);
+            if(child is Button button) yield return button;
+            foreach(var nested in ButtonsIn(child)) yield return nested;
+        }
+    }
     private void RenderState(ServerState state)
     {
+        var focused = Keyboard.FocusedElement as Button;
+        var focusId = focused is not null && new[] { DevicesPanel,OffersPanel,FilesPanel }.Any(p => p.IsAncestorOf(focused)) ? AutomationProperties.GetAutomationId(focused) : "";
         var recovery = new List<string>();
         if(state.RecoveredIncompleteUploads > 0) recovery.Add(string.Format(CultureInfo.CurrentCulture,T("RecoveryRemoved"),state.RecoveredIncompleteUploads));
         if(state.RecoverySkippedRuns > 0) recovery.Add(T("RecoverySkipped"));
@@ -727,10 +838,10 @@ public partial class MainWindow : Window
         foreach(var device in state.Devices)
         {
             var panel = new DockPanel();
-            var action = new Button { Content = T(device.Approved ? "Disconnect" : "Approve"), Tag = device }; DockPanel.SetDock(action,Dock.Right);
+            var action = new Button { Content = T(device.Approved ? "Disconnect" : "Approve"), Tag = device }; AutomationProperties.SetAutomationId(action,"device-" + (device.Approved ? "disconnect-" : "approve-") + device.Id); AutomationProperties.SetName(action,T(device.Approved ? "Disconnect" : "Approve") + " · " + device.Name); DockPanel.SetDock(action,Dock.Right);
             action.Click += async (_,_) => { try { await Api($"/api/admin/devices/{device.Id}/{(device.Approved ? "revoke" : "approve")}",HttpMethod.Post); if(!device.Approved) await Api("/api/admin/pairing",HttpMethod.Post); await Poll(); await RefreshQr(); } catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; } };
             panel.Children.Add(action);
-            if(!device.Approved) { var reject = new Button { Content = T("Reject") }; DockPanel.SetDock(reject,Dock.Right); reject.Click += async (_,_) => { try { await Api($"/api/admin/devices/{device.Id}/revoke",HttpMethod.Post); await Poll(); } catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; } }; panel.Children.Add(reject); }
+            if(!device.Approved) { var reject = new Button { Content = T("Reject") }; AutomationProperties.SetAutomationId(reject,"device-reject-" + device.Id); AutomationProperties.SetName(reject,T("Reject") + " · " + device.Name); DockPanel.SetDock(reject,Dock.Right); reject.Click += async (_,_) => { try { await Api($"/api/admin/devices/{device.Id}/revoke",HttpMethod.Post); await Poll(); } catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; } }; panel.Children.Add(reject); }
             panel.Children.Add(new TextBlock { Text = device.Name + " · " + T(device.Approved ? "Approved" : "Pending"), VerticalAlignment = VerticalAlignment.Center }); DevicesPanel.Children.Add(panel);
         }
         OffersPanel.Children.Clear();
@@ -745,6 +856,9 @@ public partial class MainWindow : Window
             foreach(var file in batch.Files) details.Children.Add(new TextBlock { Text = $"{file.Name} · {file.Size:N0} B" });
             panel.Children.Add(new Expander { Header = T("BatchDetails"), Content = details, Margin = new Thickness(0,0,0,8) });
             var actions = new WrapPanel(); var accept = new Button { Content = T("AcceptAll") }; var reject = new Button { Content = T("RejectAll") };
+            AutomationProperties.SetAutomationId(accept,"batch-accept-" + batch.Id); AutomationProperties.SetAutomationId(reject,"batch-reject-" + batch.Id);
+            AutomationProperties.SetName(accept,T("AcceptAll") + " · " + batch.DeviceName + " · " + batch.Files.Length + " " + T("BatchFiles"));
+            AutomationProperties.SetName(reject,T("RejectAll") + " · " + batch.DeviceName + " · " + batch.Files.Length + " " + T("BatchFiles"));
             async Task Decide(string action)
             {
                 accept.IsEnabled = reject.IsEnabled = false;
@@ -759,6 +873,9 @@ public partial class MainWindow : Window
             var row = new DockPanel();
             var accept = new Button { Content = T("AcceptFile") };
             var reject = new Button { Content = T("Reject") };
+            AutomationProperties.SetAutomationId(accept,"offer-accept-" + offer.Id); AutomationProperties.SetAutomationId(reject,"offer-reject-" + offer.Id);
+            AutomationProperties.SetName(accept,T("AcceptFile") + " · " + offer.Name + " · " + offer.DeviceName);
+            AutomationProperties.SetName(reject,T("Reject") + " · " + offer.Name + " · " + offer.DeviceName);
             DockPanel.SetDock(accept,Dock.Right); DockPanel.SetDock(reject,Dock.Right);
             async Task Decide(string action)
             {
@@ -776,7 +893,7 @@ public partial class MainWindow : Window
         if(state.Files.Length == 0) FilesPanel.Children.Add(new TextBlock { Text = T("NoFiles") });
         foreach(var f in state.Files)
         {
-            var row = new DockPanel(); var remove = new Button { Content = T(f.Direction == "outbound" ? "Unshare" : "Dismiss") }; DockPanel.SetDock(remove,Dock.Right);
+            var row = new DockPanel(); var remove = new Button { Content = T(f.Direction == "outbound" ? "Unshare" : "Dismiss") }; AutomationProperties.SetAutomationId(remove,"file-remove-" + f.Id); AutomationProperties.SetName(remove,T(f.Direction == "outbound" ? "Unshare" : "Dismiss") + " · " + f.Name); DockPanel.SetDock(remove,Dock.Right);
             remove.Click += async (_,_) => { try { await Api("/api/admin/files/"+f.Id,HttpMethod.Delete); await Poll(); } catch(Exception ex) when(ex is IOException or HttpRequestException) { Status.Text = ex.Message; } };
             var verified = f.Verified && UploadReceipt.IsSha256(f.Sha256);
             var label = f.Direction == "outbound" ? (verified ? "ReadyVerified" : "Ready") : (verified ? "ReceivedVerified" : "Received");
@@ -792,8 +909,19 @@ public partial class MainWindow : Window
             panel.Children.Add(new TextBlock { Text = $"{item.Name} · {item.DeviceName} · {T(item.Direction == "inbound" ? "TransferInbound" : "TransferOutbound")} · {T("Transfer_" + item.Status)}{error}" });
             var bytes = Math.Clamp(item.BytesTransferred,0,Math.Max(0,item.Size));
             panel.Children.Add(new TextBlock { Text = $"{bytes:N0} / {item.Size:N0} B · {item.Updated.LocalDateTime:t}", Margin = new Thickness(0,0,0,4) });
-            if(item.Status is "transferring" or "verifying") panel.Children.Add(new ProgressBar { Maximum = 100, Value = item.Size == 0 ? 100 : bytes * 100d / item.Size, Height = 8 });
+            if(item.Status is "transferring" or "verifying")
+            {
+                var progress = new ProgressBar { Maximum = 100, Value = item.Size == 0 ? 100 : bytes * 100d / item.Size, Height = 8 };
+                AutomationProperties.SetName(progress,T("TransferProgress") + " · " + item.Name + " · " + item.DeviceName);
+                panel.Children.Add(progress);
+            }
             TransfersPanel.Children.Add(panel);
+        }
+        if(!string.IsNullOrEmpty(focusId) && (Keyboard.FocusedElement is null || ReferenceEquals(Keyboard.FocusedElement,focused)))
+        {
+            UpdateLayout();
+            var replacement = new[] { DevicesPanel,OffersPanel,FilesPanel }.SelectMany(ButtonsIn).FirstOrDefault(b => AutomationProperties.GetAutomationId(b) == focusId && b.IsEnabled);
+            replacement?.Focus();
         }
     }
     private async Task DecideOffer(string id,string action)
@@ -936,12 +1064,13 @@ public partial class MainWindow : Window
     private async void ClosingWindow(object? sender,CancelEventArgs e)
     {
         if(closing) return; e.Cancel = true; closing = true;
+        SystemEvents.UserPreferenceChanged -= SystemPreferenceChanged;
         await StopServer(); tray.Dispose(); http.Dispose(); Close();
     }
 }
 record LanguageChoice(string Code,string Name);
 
-record DesktopSettings(string Language = "en",string? Address = null,bool SecureHttps = true,string? CertificatePath = null);
+record DesktopSettings(string Language = "en",string? Address = null,bool SecureHttps = true,string? CertificatePath = null,string Theme = "system");
 record DeviceInfo(string Id,string Name,bool Approved);
 record FileInfoDto(string Id,string Name,long Size,string Direction,string? Sha256 = null,bool Verified = false);
 record OfferInfo(string Id,string Name,long Size,string DeviceId,string DeviceName,string Status,DateTimeOffset Expires);

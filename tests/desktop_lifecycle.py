@@ -14,6 +14,7 @@ if args.without_sdk and not args.executable:
     parser.error("--without-sdk requires --executable")
 with tempfile.TemporaryDirectory(prefix="landrop-desktop-") as directory:
     data = Path(directory)
+    (data / "desktop.json").write_text('{"Language":"en","Theme":"dark"}', encoding="utf-8")
     command = ([str(args.executable.resolve())] if args.executable else
                ["dotnet", "run", "--project", str(ROOT / "src/LanDrop.Desktop"),
                 "-c", "Release", "--no-build", "--"])
@@ -30,7 +31,8 @@ with tempfile.TemporaryDirectory(prefix="landrop-desktop-") as directory:
     result = subprocess.run(
         command + ["--lifecycle-test", f"--TestDataDirectory={data}"],
         cwd=ROOT, env=environment, timeout=75, capture_output=True, text=True, errors="replace")
-    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
+    error = data / "lifecycle-error.json"
+    assert result.returncode == 0, (result.returncode, result.stdout, result.stderr, error.read_text(encoding="utf-8-sig") if error.exists() else "No fixture error report")
     # Hook must prove it ran; a normal window smoke test cannot count as lifecycle coverage.
     proof = data / "lifecycle-test.json"
     assert proof.exists(), "Desktop must write lifecycle-test.json after real start and stop"
@@ -49,6 +51,18 @@ with tempfile.TemporaryDirectory(prefix="landrop-desktop-") as directory:
     assert evidence["CertificateExpiryStops"] is True and evidence["DiagnosticExportPrivate"] is True
     assert evidence["HistoryRendered"] is True and evidence["HistoryRestored"] is True
     assert evidence["HistoryDisabledRetains"] is True and evidence["HistoryClearKeepsFiles"] is True
+    assert evidence["ThemesChanged"] and evidence["SystemFallback"] and evidence["ThemePersisted"]
+    assert evidence["DynamicFocusRetained"]
+    assert evidence["AutomationLocalized"] and evidence["ThemeContrast"] and evidence["HighContrastPalette"]
+    import shutil
+    screenshots = os.environ.get("LAN_DROP_DESKTOP_SCREENSHOTS")
+    for theme in ("light", "dark"):
+        screenshot = data / f"desktop-{theme}.png"
+        assert screenshot.read_bytes().startswith(b"\x89PNG\r\n\x1a\n") and screenshot.stat().st_size > 10000
+        if screenshots:
+            target = Path(screenshots)
+            target.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(screenshot, target / screenshot.name)
     assert evidence["ServerExitCode"] == 0
     assert not list((data / "Outbox").glob("*"))
-    print("PASS: native HTTP/HTTPS lifecycle, localized certificate preflight and recovered public details, input invalidation, expiry shutdown, private diagnostic export, password non-persistence, consent, verified transfers, retry, persistent opt-in history, metadata-only clear and owned cleanup.")
+    print("PASS: native HTTP/HTTPS lifecycle, localized certificate preflight and recovered public details, input invalidation, expiry shutdown, private diagnostic export, password non-persistence, consent, verified transfers, retry, persistent opt-in history, metadata-only clear, persisted themes, contrast, high contrast palette, localized automation, focus preservation and owned cleanup.")

@@ -7,7 +7,7 @@ let pairCode = fragment.get('pair');
 history.replaceState(null, '', location.pathname);
 let busy = false, cancelled = false, current = null, offerCancellation = null, qrUrl = null, qrAddress = null, lastState = null;
 let platformPreference = 'auto', customDeviceName = false;
-let transferQueue = null, lastTransferEvents = [];
+let transferQueue = null, lastTransferEvents = [], progressTextFormatter = null, noticeTranslation = null;
 try { platformPreference = MobileUX.normalizePreference(localStorage.getItem('landrop-platform')); } catch {}
 const uploadSupport = MobileUX.uploadCapabilities(globalThis);
 function applyMobileUX() {
@@ -32,7 +32,14 @@ function renderTransport(state = lastState) {
   $('transport-notice').classList.toggle('error', !secure);
 }
 const headers = () => admin ? {'X-LanDrop-Admin': admin} : {'X-LanDrop-Session': token || ''};
-function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
+function notice(message, error = false) { noticeTranslation = null; $('notice').textContent = message; $('notice').classList.toggle('error', error); }
+function translatedNotice(key, values = {}, error = false) {
+  notice(t(key, values), error);
+  noticeTranslation = {key, values};
+}
+function refreshNoticeLanguage() {
+  if(noticeTranslation) $('notice').textContent = t(noticeTranslation.key, noticeTranslation.values);
+}
 async function api(path, options = {}) {
   if(typeof fetch !== 'function') throw new Error(t('browserUnsupported'));
   const deadline = typeof AbortController === 'function' ? new AbortController() : null;
@@ -52,7 +59,7 @@ async function api(path, options = {}) {
 const post = (path, data) => api(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data || {})});
 function size(bytes) { const units = ['B','KB','MB','GB']; let i = 0; while(bytes >= 1024 && i < 3) { bytes /= 1024; i++; } return bytes.toLocaleString(locale(), {minimumFractionDigits:i ? 1 : 0, maximumFractionDigits:i ? 1 : 0}) + ' ' + units[i]; }
 function row(name, detail) { const el = document.createElement('div'); el.className = 'row'; const info = document.createElement('div'); info.className = 'info'; const title = document.createElement('strong'); title.textContent = name; const small = document.createElement('small'); small.textContent = detail; info.append(title, small); el.append(info); return el; }
-function button(label, action) { const b = document.createElement('button'); b.className = 'secondary'; b.textContent = label; b.onclick = async () => { b.disabled = true; try { await action(); await refresh(); } catch(e) { notice(e.message,true); } finally { b.disabled = false; } }; return b; }
+function button(label, action, accessibleLabel = label, focusKey = null) { const b = document.createElement('button'); b.className = 'secondary'; b.textContent = label; b.setAttribute('aria-label', accessibleLabel); if(focusKey) b.dataset.focusKey = focusKey; b.onclick = async () => { b.disabled = true; try { await action(); await refresh(); } catch(e) { notice(e.message,true); } finally { b.disabled = false; } }; return b; }
 async function qr() {
   if (!$('address').value) { $('qr').textContent = t('noAddress'); return; }
   const result = await api('/api/admin/qr?address=' + encodeURIComponent($('address').value));
@@ -62,6 +69,12 @@ async function qr() {
   $('pair-link').href = result.link; qrAddress = $('address').value;
 }
 async function refresh(cachedState = null) {
+  let focusedElement, focusedKey, expandedBatches;
+  const captureFocus = () => {
+    focusedElement = document.activeElement;
+    focusedKey = focusedElement?.dataset.focusKey;
+    expandedBatches = new Set([...document.querySelectorAll('#batches details[open] summary[data-focus-key]')].map(el => el.dataset.focusKey));
+  };
   if (admin) {
     const data = cachedState || await api('/api/admin');
     lastState = data;
@@ -80,9 +93,10 @@ async function refresh(cachedState = null) {
     if(loopback) { $('qr').replaceChildren(); $('pair-link').hidden = true; }
     else { $('pair-link').hidden = false; if (qrAddress !== $('address').value) await qr(); }
     $('expiry').textContent = Date.now() < Date.parse(data.pairingExpires) ? t('qrUntil', {time:new Date(data.pairingExpires).toLocaleTimeString(locale())}) : t('qrExpired');
+    captureFocus();
     $('devices').replaceChildren();
     if (!data.devices.length) $('devices').textContent = t('noDevices');
-    for (const d of data.devices) { const el = row(d.name, d.approved ? t('approved') : t('pending')); if (!d.approved) el.append(button(t('approve'),()=>post('/api/admin/devices/'+d.id+'/approve'))); el.append(button(d.approved ? t('disconnect') : t('reject'),()=>post('/api/admin/devices/'+d.id+'/revoke'))); $('devices').append(el); }
+    for (const d of data.devices) { const el = row(d.name, d.approved ? t('approved') : t('pending')); if (!d.approved) el.append(button(t('approve'),()=>post('/api/admin/devices/'+d.id+'/approve'),t('approveDevice',{device:d.name}),'device-approve-'+d.id)); el.append(button(d.approved ? t('disconnect') : t('reject'),()=>post('/api/admin/devices/'+d.id+'/revoke'),t(d.approved ? 'disconnectDevice' : 'rejectDevice',{device:d.name}),'device-revoke-'+d.id)); $('devices').append(el); }
     $('recipient-control').hidden = false;
     const selectedRecipient = $('recipient').value;
     const approvedDevices = data.devices.filter(d=>d.approved);
@@ -95,8 +109,8 @@ async function refresh(cachedState = null) {
     if(!data.offers?.length) $('offers').textContent = t('noOffers');
     for(const offer of data.offers || []) {
       const el = row(offer.name, offer.deviceName + ' · ' + size(offer.size));
-      el.append(button(t('acceptFile'),()=>post('/api/admin/offers/'+offer.id+'/approve')),
-        button(t('reject'),()=>post('/api/admin/offers/'+offer.id+'/reject')));
+      el.append(button(t('acceptFile'),()=>post('/api/admin/offers/'+offer.id+'/approve'),t('acceptNamedFile',{file:offer.name,device:offer.deviceName}),'offer-approve-'+offer.id),
+        button(t('reject'),()=>post('/api/admin/offers/'+offer.id+'/reject'),t('rejectNamedFile',{file:offer.name,device:offer.deviceName}),'offer-reject-'+offer.id));
       $('offers').append(el);
     }
     $('batch-section').hidden = false;
@@ -105,11 +119,11 @@ async function refresh(cachedState = null) {
     for(const batch of data.batches || []) {
       const el = row(batch.deviceName, t('batchSummary',{count:batch.files.length,size:size(batch.totalSize)}));
       const details = document.createElement('details');
-      const summary = document.createElement('summary'); summary.textContent = t('viewFiles'); details.append(summary);
+      const summary = document.createElement('summary'); summary.textContent = t('viewFiles'); summary.dataset.focusKey = 'batch-details-'+batch.id; details.open = expandedBatches.has(summary.dataset.focusKey); details.append(summary);
       for(const file of batch.files) { const name = document.createElement('p'); name.textContent = file.name+' · '+size(file.size); details.append(name); }
       el.querySelector('.info').append(details);
-      el.append(button(t('acceptBatch'),()=>post('/api/admin/offer-batches/'+batch.id+'/approve')),
-        button(t('reject'),()=>post('/api/admin/offer-batches/'+batch.id+'/reject')));
+      el.append(button(t('acceptBatch'),()=>post('/api/admin/offer-batches/'+batch.id+'/approve'),t('acceptNamedBatch',{count:batch.files.length,device:batch.deviceName}),'batch-approve-'+batch.id),
+        button(t('reject'),()=>post('/api/admin/offer-batches/'+batch.id+'/reject'),t('rejectNamedBatch',{count:batch.files.length,device:batch.deviceName}),'batch-reject-'+batch.id));
       $('batches').append(el);
     }
     renderTransfers(data.transfers || []);
@@ -117,7 +131,12 @@ async function refresh(cachedState = null) {
     const data = cachedState || await api('/api/state');
     lastState = data;
     $('waiting').hidden = data.approved; $('transfer').hidden = !data.approved; $('file-section').hidden = !data.approved;
-    if (data.approved) { if (!cachedState) await post('/api/download-session'); renderFiles(data.files, false); renderTransfers(cachedState ? lastTransferEvents : await api('/api/transfers')); }
+    if (data.approved) { if (!cachedState) await post('/api/download-session'); captureFocus(); renderFiles(data.files, false); renderTransfers(cachedState ? lastTransferEvents : await api('/api/transfers')); }
+  }
+  // Polling replaces rows; retain keyboard focus only if its previous control survived.
+  if(focusedKey && !focusedElement.isConnected && document.activeElement === document.body) {
+    const replacement = [...document.querySelectorAll('[data-focus-key]')].find(el => el.dataset.focusKey === focusedKey);
+    replacement?.focus({preventScroll:true});
   }
 }
 function renderTransfers(events) {
@@ -143,7 +162,16 @@ function renderQueue() {
 function renderFiles(files, local) {
   $('files').replaceChildren();
   if (!files.length) $('files').textContent = local ? t('noTransfers') : t('noFiles');
-  for (const f of files) { const checked = f.verified === true && /^[a-f0-9]{64}$/.test(f.sha256); const el = row(f.name, size(f.size) + (local ? (f.direction === 'outbound' ? t('preparedSuffix') : t('receivedSuffix')) : '') + (checked ? t('pcCopyChecked') : '')); if (local) el.append(button(f.direction === 'outbound' ? t('unshare') : t('hide'),()=>api('/api/admin/files/'+f.id,{method:'DELETE'}))); else { const a = document.createElement('a'); a.href = '/download/'+f.id; a.textContent = t('download'); a.setAttribute('download',f.name); el.append(a); } $('files').append(el); }
+  for (const f of files) { const checked = f.verified === true && /^[a-f0-9]{64}$/.test(f.sha256); const el = row(f.name, size(f.size) + (local ? (f.direction === 'outbound' ? t('preparedSuffix') : t('receivedSuffix')) : '') + (checked ? t('pcCopyChecked') : '')); if (local) el.append(button(f.direction === 'outbound' ? t('unshare') : t('hide'),()=>api('/api/admin/files/'+f.id,{method:'DELETE'}),t(f.direction === 'outbound' ? 'unshareNamedFile' : 'hideNamedFile',{file:f.name}),'file-remove-'+f.id)); else { const a = document.createElement('a'); a.href = '/download/'+f.id; a.textContent = t('download'); a.setAttribute('aria-label',t('downloadNamedFile',{file:f.name})); a.setAttribute('download',f.name); a.dataset.focusKey = 'file-download-'+f.id; el.append(a); } $('files').append(el); }
+}
+function setProgressText(formatter) {
+  progressTextFormatter = formatter;
+  updateProgressAccessibility();
+}
+function updateProgressAccessibility() {
+  if(progressTextFormatter) $('progress-text').textContent = progressTextFormatter();
+  $('progress').setAttribute('aria-label', t('transferProgress'));
+  $('progress').setAttribute('aria-valuetext', $('progress-text').textContent);
 }
 function upload(file, index, count, recipientId, offerId, sha256, item) {
   return new Promise((resolve,reject) => {
@@ -155,12 +183,14 @@ function upload(file, index, count, recipientId, offerId, sha256, item) {
       lastRender = now;
       const sample = meter.sample(loaded);
       $('progress').value = sample.percent;
+      setProgressText(() => {
       const eta = sample.remainingSeconds === null ? t('estimating') :
         sample.remainingSeconds >= 3600 ? t('etaHours', {value:Math.ceil(sample.remainingSeconds/3600)}) :
         sample.remainingSeconds >= 60 ? t('etaMinutes', {value:Math.ceil(sample.remainingSeconds/60)}) :
         t('etaSeconds', {value:sample.remainingSeconds});
       const detail = loaded >= file.size ? t('waitingForSave') : t('speedEta', {speed:size(sample.speed), eta});
-      $('progress-text').textContent = index+'/'+count+' · '+file.name+' · '+Math.round(sample.percent)+' % · '+detail;
+      return index+'/'+count+' · '+file.name+' · '+Math.round(sample.percent)+' % · '+detail;
+      });
     };
     const xhr = current = new XMLHttpRequest();
     xhr.open('PUT','/api/files?name='+encodeURIComponent(file.name)+(admin ? '&recipient='+encodeURIComponent(recipientId) : '&offer='+encodeURIComponent(offerId)));
@@ -183,11 +213,11 @@ function upload(file, index, count, recipientId, offerId, sha256, item) {
   });
 }
 async function send(files, retry = false) {
-  if(!uploadSupport.supported) { notice(t('uploadUnsupported'), true); return; }
+  if(!uploadSupport.supported) { translatedNotice('uploadUnsupported', {}, true); return; }
   if(busy || !files.length) return;
   const recipientId = admin ? $('recipient').value : null;
-  if(admin && !recipientId) { notice(t('noRecipient'), true); return; }
-  if(files.length > 1000 || files.some(file => file.size > 10*1024**3)) { notice(t('invalid_batch'),true); return; }
+  if(admin && !recipientId) { translatedNotice('noRecipient', {}, true); return; }
+  if(files.length > 1000 || files.some(file => file.size > 10*1024**3)) { translatedNotice('invalid_batch', {}, true); return; }
   if(!retry) transferQueue = new TransferQueue(files);
   const pending = transferQueue.remaining();
   $('recipient').disabled = true;
@@ -198,7 +228,7 @@ async function send(files, retry = false) {
     if(!admin) {
       for(const item of pending) transferQueue.transition(item,'waiting'); renderQueue();
       batch = await new BatchOfferClient(api).approve(pending.map(item=>item.file), offerCancellation.signal, () => {
-        $('progress').value = 0; $('progress-text').textContent = t('waitingForBatchApproval',{count:pending.length});
+        $('progress').value = 0; setProgressText(() => t('waitingForBatchApproval',{count:pending.length}));
       });
     }
     for(let i=0; i<pending.length; i++) {
@@ -207,23 +237,27 @@ async function send(files, retry = false) {
       transferQueue.transition(activeItem,'preparing'); renderQueue();
       const sha256 = await hashFile(file, offerCancellation.signal, (loaded,total) => {
         const percent = total === 0 ? 100 : Math.round(loaded*100/total);
-        $('progress').value = percent; $('progress-text').textContent = (i+1)+'/'+pending.length+' · '+file.name+' · '+t('checkingFile',{percent});
+        $('progress').value = percent; setProgressText(() => (i+1)+'/'+pending.length+' · '+file.name+' · '+t('checkingFile',{percent}));
       });
       if(cancelled) throw new DOMException('Cancelled','AbortError');
       transferQueue.transition(activeItem,'transferring'); renderQueue();
       await upload(file,i+1,pending.length,recipientId,batch?.offers[i].id,sha256,activeItem);
       transferQueue.transition(activeItem,'completed'); renderQueue();
-      $('history').prepend(row(file.name, admin ? t('prepared') : t('saved')));
+      const completed = row(file.name, t(admin ? 'prepared' : 'saved'));
+      completed.querySelector('small').dataset.i18n = admin ? 'prepared' : 'saved';
+      $('history').prepend(completed);
       activeItem = null;
     }
-    if(!cancelled) notice(t(admin ? 'outgoingDone' : 'done'));
+    if(!cancelled) translatedNotice(admin ? 'outgoingDone' : 'done');
     await refresh();
   } catch(e) {
     const message = cancelled || e.name === 'AbortError' ? t('cancelled') : e.code ? t(e.code) : translations.en[e.message] ? t(e.message) : e.message;
     if(activeItem) transferQueue.transition(activeItem,cancelled ? 'cancelled' : 'failed',message);
     else for(const item of pending) if(item.state !== 'completed') transferQueue.transition(item,cancelled ? 'cancelled' : 'failed',message);
     for(const item of pending) if(item.state === 'waiting') transferQueue.transition(item,'queued');
-    notice(message,true);
+    const messageKey = cancelled || e.name === 'AbortError' ? 'cancelled' : e.code && translations.en[e.code] ? e.code : translations.en[e.message] ? e.message : null;
+    if(messageKey) translatedNotice(messageKey, {}, true);
+    else notice(message,true);
   }
   finally {
     if(batch?.id) await api('/api/offer-batches/'+encodeURIComponent(batch.id),{method:'DELETE'}).catch(()=>{});
@@ -238,17 +272,18 @@ $('drop').ondragover = e => { e.preventDefault(); if(uploadSupport.supported) $(
 $('drop').ondragleave = () => $('drop').classList.remove('drag');
 $('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('drag'); if(uploadSupport.supported) send([...e.dataTransfer.files]); };
 $('address').onchange = () => qr().catch(e=>notice(e.message,true));
-$('renew').onclick = async () => { try { await post('/api/admin/pairing'); await qr(); await refresh(); notice(t('qrReady')); } catch(e) { notice(e.message,true); } };
+$('renew').onclick = async () => { try { await post('/api/admin/pairing'); await qr(); await refresh(); translatedNotice('qrReady'); } catch(e) { notice(e.message,true); } };
 $('folder').oninput = () => $('folder').dataset.edited = 'true';
-$('folder-form').onsubmit = async e => { e.preventDefault(); try { await post('/api/admin/folder',{path:$('folder').value}); delete $('folder').dataset.edited; await refresh(); notice(t('folderChanged')); } catch(e) { notice(e.message,true); } };
-$('pair-form').onsubmit = async e => { e.preventDefault(); const b = e.target.querySelector('button'); b.disabled = true; try { const r = await post('/api/pair',{code:pairCode,name:$('device-name').value}); token = r.token; sessionStorage.setItem('landrop-session',token); $('pair').hidden = true; notice(t('confirmPc')); await refresh(); } catch(e) { notice(e.message,true); } finally { b.disabled = false; } };
+$('folder-form').onsubmit = async e => { e.preventDefault(); try { await post('/api/admin/folder',{path:$('folder').value}); delete $('folder').dataset.edited; await refresh(); translatedNotice('folderChanged'); } catch(e) { notice(e.message,true); } };
+$('pair-form').onsubmit = async e => { e.preventDefault(); const b = e.target.querySelector('button'); b.disabled = true; try { const r = await post('/api/pair',{code:pairCode,name:$('device-name').value}); token = r.token; sessionStorage.setItem('landrop-session',token); $('pair').hidden = true; translatedNotice('confirmPc'); await refresh(); } catch(e) { notice(e.message,true); } finally { b.disabled = false; } };
 applyLanguage();
+updateProgressAccessibility();
 applyMobileUX();
 $('device-name').oninput = () => { customDeviceName = true; };
 $('platform').onchange = () => { platformPreference = MobileUX.normalizePreference($('platform').value); try { localStorage.setItem('landrop-platform', platformPreference); } catch {} applyMobileUX(); };
-$('language').onchange = () => { setLanguage($('language').value); applyMobileUX(); renderQueue(); refresh(lastState).catch(e=>notice(e.message,true)); const qrImage = $('qr').querySelector('img'); if(qrImage) qrImage.alt = t('qrAlt'); };
+$('language').onchange = () => { setLanguage($('language').value); refreshNoticeLanguage(); updateProgressAccessibility(); applyMobileUX(); renderQueue(); refresh(lastState).catch(e=>notice(e.message,true)); const qrImage = $('qr').querySelector('img'); if(qrImage) qrImage.alt = t('qrAlt'); };
 if (pairCode && !admin) { token = null; sessionStorage.removeItem('landrop-session'); $('pair').hidden = false; }
 else if(!admin && !token) $('welcome').hidden = false;
 else refresh().catch(e=>notice(e.message,true));
-if(typeof fetch !== 'function') notice(t('browserUnsupported'), true);
+if(typeof fetch !== 'function') translatedNotice('browserUnsupported', {}, true);
 else setInterval(()=>{ if(admin || token) refresh().catch(e=>notice(e.message,true)); },3000);

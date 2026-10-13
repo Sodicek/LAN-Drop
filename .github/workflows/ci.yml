@@ -37,6 +37,7 @@ jobs:
       - name: Check browser script syntax
         run: |
           node --check src/LanDrop/wwwroot/app.js
+          node --check src/LanDrop/wwwroot/theme.js
           node --check src/LanDrop/wwwroot/i18n.js
           node --check src/LanDrop/wwwroot/progress.js
           node --check src/LanDrop/wwwroot/offers.js
@@ -47,6 +48,8 @@ jobs:
           node --check src/LanDrop/wwwroot/vendor/sha256.js
       - name: Check localization coverage
         run: node tests/localization.cjs
+      - name: Check browser theme preferences
+        run: node tests/theme.cjs
       - name: Check mobile platform and capability handling
         run: node tests/mobile.cjs
       - name: Check progress calculations
@@ -107,4 +110,13 @@ jobs:
             dotnet run --project src/LanDrop.Desktop -c Release --no-build -- --smoke-test
           }
       - name: Check desktop server lifecycle
+        env:
+          LAN_DROP_DESKTOP_SCREENSHOTS: ${{ runner.temp }}/landrop-desktop-theme-screenshots
         run: python tests/desktop_lifecycle.py
+      - name: Save native theme screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-theme-screenshots
+          path: ${{ runner.temp }}/landrop-desktop-theme-screenshots
+          if-no-files-found: ignore

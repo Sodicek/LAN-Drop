@@ -2,42 +2,66 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  Title="LAN Drop" Width="1020" Height="850" MinWidth="740" MinHeight="600"
- Background="#101416" Foreground="#F3F5F2" AllowDrop="True" Drop="FilesDropped">
+ Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}" AllowDrop="True" Drop="FilesDropped">
  <Window.Resources>
+  <Style x:Key="VisibleKeyboardFocus" TargetType="Control"><Setter Property="Template"><Setter.Value><ControlTemplate><Rectangle Margin="-3" Stroke="{DynamicResource FocusBrush}" StrokeThickness="2" StrokeDashArray="2,1"/></ControlTemplate></Setter.Value></Setter></Style>
+  <Style TargetType="Control"><Setter Property="FocusVisualStyle" Value="{StaticResource VisibleKeyboardFocus}"/></Style>
   <Style TargetType="TextBlock"><Setter Property="Margin" Value="0,0,0,10"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
-  <Style TargetType="Button"><Setter Property="Padding" Value="14,8"/><Setter Property="Margin" Value="0,4,10,4"/><Setter Property="Background" Value="#C2F970"/><Setter Property="Foreground" Value="#162208"/><Setter Property="BorderThickness" Value="0"/></Style>
-  <Style TargetType="ComboBox"><Setter Property="MinWidth" Value="200"/><Setter Property="Margin" Value="0,4,10,10"/></Style>
-  <Style TargetType="GroupBox"><Setter Property="Padding" Value="18"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="Foreground" Value="#F3F5F2"/><Setter Property="BorderBrush" Value="#303B3F"/></Style>
+  <Style TargetType="Button" BasedOn="{StaticResource {x:Type Control}}">
+   <Setter Property="Padding" Value="14,8"/><Setter Property="Margin" Value="0,4,10,4"/>
+   <Setter Property="Background" Value="{DynamicResource ButtonBrush}"/><Setter Property="Foreground" Value="{DynamicResource ButtonTextBrush}"/>
+   <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border x:Name="Surface" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}" CornerRadius="3"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/></Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource ButtonHoverBrush}"/><Setter Property="Foreground" Value="{DynamicResource ButtonHoverTextBrush}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="Surface" Property="BorderThickness" Value="2"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Surface" Property="Background" Value="{DynamicResource WindowBrush}"/><Setter Property="Foreground" Value="{DynamicResource DisabledTextBrush}"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type Control}}"><Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"/><Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"/><Setter Property="MinWidth" Value="200"/><Setter Property="Margin" Value="0,4,10,10"/></Style>
+  <Style TargetType="GroupBox" BasedOn="{StaticResource {x:Type Control}}"><Setter Property="Padding" Value="18"/><Setter Property="Margin" Value="0,0,0,16"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/></Style>
+  <Style TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type Control}}">
+   <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"/><Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"/>
+   <Setter Property="Padding" Value="6,4"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem"><Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border></ControlTemplate></Setter.Value></Setter>
+   <Style.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/><Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"/></Trigger><Trigger Property="IsSelected" Value="True"><Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.HighlightTextBrushKey}}"/><Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.HighlightBrushKey}}"/></Trigger></Style.Triggers>
+  </Style>
+  <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type Control}}"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
+  <Style TargetType="Expander" BasedOn="{StaticResource {x:Type Control}}"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
+  <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type Control}}"><Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"/><Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"/></Style>
+  <Style TargetType="PasswordBox" BasedOn="{StaticResource {x:Type Control}}"><Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.WindowTextBrushKey}}"/><Setter Property="Background" Value="{DynamicResource {x:Static SystemColors.WindowBrushKey}}"/></Style>
  </Window.Resources>
  <ScrollViewer VerticalScrollBarVisibility="Auto">
  <StackPanel Margin="30">
-  <DockPanel><ComboBox x:Name="LanguagePicker" DockPanel.Dock="Right" SelectionChanged="LanguageChanged" AutomationProperties.Name="LanguagePicker"/>
-   <TextBlock Text="LAN DROP" FontSize="30" FontWeight="Bold" Foreground="#C2F970"/>
+  <DockPanel><StackPanel DockPanel.Dock="Right"><TextBlock x:Name="ThemeLabel" Margin="0,0,0,0"/><ComboBox x:Name="ThemePicker" SelectionChanged="ThemeChanged"/></StackPanel><ComboBox x:Name="LanguagePicker" DockPanel.Dock="Right" VerticalAlignment="Center" SelectionChanged="LanguageChanged" AutomationProperties.Name="LanguagePicker"/>
+   <TextBlock Text="LAN DROP" FontSize="30" FontWeight="Bold" Foreground="{DynamicResource AccentBrush}"/>
   </DockPanel>
   <TextBlock x:Name="Subtitle" FontSize="17"/>
-  <TextBlock x:Name="Status" Foreground="#C2F970" AutomationProperties.LiveSetting="Polite"/>
-  <TextBlock x:Name="SecurityNote" Foreground="#D6B86A"/>
-  <TextBlock x:Name="RecoveryNotice" Foreground="#D6B86A" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite"/>
+  <TextBlock x:Name="Status" Foreground="{DynamicResource AccentBrush}" AutomationProperties.LiveSetting="Polite"/>
+  <TextBlock x:Name="SecurityNote" Foreground="{DynamicResource WarningBrush}"/>
+  <TextBlock x:Name="RecoveryNotice" Foreground="{DynamicResource WarningBrush}" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite"/>
   <GroupBox x:Name="ConnectionGroup">
    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="240"/></Grid.ColumnDefinitions>
     <StackPanel>
      <TextBlock x:Name="NetworkLabel"/>
      <ComboBox x:Name="Network" DisplayMemberPath="Label" SelectedValuePath="Address" SelectionChanged="CertificateNetworkChanged" AutomationProperties.Name="Network interface"/>
-     <CheckBox x:Name="SecureHttps" Checked="TransportChanged" Unchecked="TransportChanged" Margin="0,4,0,10" Foreground="#F3F5F2"/>
-     <TextBlock x:Name="TransportStatus" Foreground="#D6B86A" AutomationProperties.LiveSetting="Polite"/>
+     <CheckBox x:Name="SecureHttps" Checked="TransportChanged" Unchecked="TransportChanged" Margin="0,4,0,10" Foreground="{DynamicResource TextBrush}"/>
+     <TextBlock x:Name="TransportStatus" Foreground="{DynamicResource WarningBrush}" AutomationProperties.LiveSetting="Polite"/>
      <StackPanel x:Name="CertificateControls">
       <TextBlock x:Name="CertificateLabel"/>
       <TextBox x:Name="CertificatePath" IsReadOnly="True" TextChanged="CertificateInputChanged" Margin="0,0,12,6" AutomationProperties.Name="HTTPS certificate path"/>
       <TextBlock x:Name="CertificatePasswordLabel"/>
       <PasswordBox x:Name="CertificatePassword" PasswordChanged="CertificateInputChanged" Margin="0,0,12,6" AutomationProperties.Name="Session-only certificate password"/>
       <WrapPanel><Button x:Name="ChooseCertificateButton" Click="ChooseCertificate"/><Button x:Name="GenerateCertificateButton" Click="GenerateCertificate"/><Button x:Name="CheckCertificateButton" Click="CheckCertificate"/></WrapPanel>
-      <TextBlock x:Name="CertificateInfo" Foreground="#A5B1B5" AutomationProperties.LiveSetting="Polite"/>
+      <TextBlock x:Name="CertificateInfo" Foreground="{DynamicResource MutedBrush}" AutomationProperties.LiveSetting="Polite"/>
      </StackPanel>
      <Button x:Name="CopyCertificateButton" Click="CopyCertificateDetails" HorizontalAlignment="Left" IsEnabled="False"/>
      <Expander x:Name="CertificateHelpHeader" Margin="0,6,12,12"><TextBlock x:Name="CertificateHelp" Margin="0,10,0,0"/></Expander>
      <WrapPanel><Button x:Name="StartButton" Click="StartSharing"/><Button x:Name="StopButton" Click="StopSharing" IsEnabled="False"/><Button x:Name="DiagnosticsButton" Click="ShowDiagnostics"/><Button x:Name="ExportDiagnosticsButton" Click="ExportDiagnostics"/><Button x:Name="NewQrButton" Click="NewQr" IsEnabled="False"/></WrapPanel>
-     <TextBlock x:Name="ExportDiagnosticsHelp" Foreground="#A5B1B5"/>
-     <TextBlock x:Name="LinkText" Foreground="#A5B1B5" Margin="0,14,12,0"/>
+     <TextBlock x:Name="ExportDiagnosticsHelp" Foreground="{DynamicResource MutedBrush}"/>
+     <TextBlock x:Name="LinkText" Foreground="{DynamicResource MutedBrush}" Margin="0,14,12,0"/>
      <Button x:Name="CopyLinkButton" Click="CopyLink" HorizontalAlignment="Left" IsEnabled="False"/>
     </StackPanel>
     <Image x:Name="QrImage" Grid.Column="1" Width="220" Height="220" Stretch="Uniform" AutomationProperties.Name="Pairing QR code"/>
@@ -49,18 +73,18 @@
   <GroupBox x:Name="SendGroup"><StackPanel>
    <TextBlock x:Name="RecipientLabel"/><ComboBox x:Name="Recipient" DisplayMemberPath="Name" SelectedValuePath="Id" AutomationProperties.Name="Recipient"/>
    <WrapPanel><Button x:Name="SendButton" Click="SelectFiles" IsEnabled="False"/><Button x:Name="RetryButton" Click="RetryFiles" IsEnabled="False"/><Button x:Name="ClearRetryButton" Click="ClearRetry" IsEnabled="False"/><Button x:Name="CancelButton" Click="CancelTransfer" IsEnabled="False"/><Button x:Name="HideButton" Click="HideToTray"/></WrapPanel>
-   <TextBlock x:Name="RetryHelp" Foreground="#D6B86A"/>
+   <TextBlock x:Name="RetryHelp" Foreground="{DynamicResource WarningBrush}"/>
    <ProgressBar x:Name="UploadProgress" Height="12" Maximum="100"/><TextBlock x:Name="ProgressText" Margin="0,10,0,0"/>
   </StackPanel></GroupBox>
   <GroupBox x:Name="FilesGroup"><StackPanel x:Name="FilesPanel"/></GroupBox>
   <GroupBox x:Name="TransfersGroup"><StackPanel><TextBlock x:Name="TransfersHelp"/><Button x:Name="TransferFolderButton" Click="OpenFolder" IsEnabled="False" HorizontalAlignment="Left"/><StackPanel x:Name="TransfersPanel"/></StackPanel></GroupBox>
   <GroupBox x:Name="HistoryGroup"><StackPanel>
-   <CheckBox x:Name="HistoryEnabled" Checked="HistorySettingChanged" Unchecked="HistorySettingChanged" Foreground="#F3F5F2" Margin="0,0,0,10" IsEnabled="False"/>
-   <TextBlock x:Name="HistoryHelp" Foreground="#A5B1B5"/>
-   <TextBlock x:Name="HistoryStatus" Foreground="#D6B86A" AutomationProperties.LiveSetting="Polite"/>
+   <CheckBox x:Name="HistoryEnabled" Checked="HistorySettingChanged" Unchecked="HistorySettingChanged" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,10" IsEnabled="False"/>
+   <TextBlock x:Name="HistoryHelp" Foreground="{DynamicResource MutedBrush}"/>
+   <TextBlock x:Name="HistoryStatus" Foreground="{DynamicResource WarningBrush}" AutomationProperties.LiveSetting="Polite"/>
    <Button x:Name="ClearHistoryButton" Click="ClearHistory" IsEnabled="False" HorizontalAlignment="Left"/>
    <StackPanel x:Name="HistoryPanel"/>
   </StackPanel></GroupBox>
-  <TextBlock x:Name="VersionText" Foreground="#A5B1B5"/>
+  <TextBlock x:Name="VersionText" Foreground="{DynamicResource MutedBrush}"/>
  </StackPanel></ScrollViewer>
 </Window>

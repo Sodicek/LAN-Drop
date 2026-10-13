@@ -19,6 +19,92 @@ async function until(check, label) {
   while(Date.now() < deadline) { const value = await check(); if(value) return value; await delay(100); }
   throw new Error('Timed out: ' + label);
 }
+async function checkTextContrast(page, label) {
+  // Focused palette checks, not a complete accessibility audit. Disabled controls
+  // and browser-owned file-picker text are outside this normal-text check.
+  const samples = await page.evaluate(() => {
+    const rgba = value => {
+      const parts = value.match(/[\d.]+/g)?.map(Number);
+      if(!parts || parts.length < 3) throw new Error('Unsupported computed color: ' + value);
+      return [...parts.slice(0,3), parts[3] ?? 1];
+    };
+    const composite = (top, bottom) => top.slice(0,3).map((v,i) => v*top[3]+bottom[i]*(1-top[3]));
+    const luminance = rgb => rgb.map(v => {v/=255; return v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4;})
+      .reduce((sum,v,i) => sum+v*[.2126,.7152,.0722][i],0);
+    const background = element => {
+      const chain = []; for(let item=element; item; item=item.parentElement) chain.unshift(item);
+      return chain.reduce((color,item) => composite(rgba(getComputedStyle(item).backgroundColor),color),[255,255,255]);
+    };
+    const selectors = ['body','p','label:not(.drop)','footer','.badge','.eyebrow','input:not([type=file]):not(:disabled)',
+      'select:not(:disabled)','button:not(:disabled)','.secondary:not(:disabled)','.drop strong','.drop span','.row small','.row a','#notice'];
+    return selectors.flatMap(selector => [...document.querySelectorAll(selector)].filter(element =>
+      element.getClientRects().length && (element.textContent.trim() || element.value) && !element.closest('[hidden]'))
+      .map(element => {
+        const bg = background(element), fg = composite(rgba(getComputedStyle(element).color),bg);
+        const a=luminance(fg), b=luminance(bg);
+        return {selector, text:(element.textContent.trim() || element.value).slice(0,60), contrast:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)};
+      }));
+  });
+  assert.ok(samples.length >= 8, 'Actual visible palette samples are present');
+  for(const sample of samples) assert.ok(sample.contrast >= 4.5, `${label} ${sample.selector} ${sample.text}: ${sample.contrast.toFixed(2)}:1 normal text contrast`);
+}
+async function checkThemes(page, profileName, portrait) {
+  const theme = page.locator('#theme');
+  const resolved = () => page.locator('html').getAttribute('data-theme');
+  await theme.waitFor();
+  assert.equal(await theme.inputValue(), 'system', 'First visit uses the system theme');
+  for(const [language,label,options] of [['en','Theme',['System','Light','Dark']],['cs','Vzhled',['Podle systému','Světlý','Tmavý']]]) {
+    await page.locator('#language').selectOption(language);
+    assert.equal(await page.locator('label[for=theme]').textContent(),label);
+    assert.deepEqual(await theme.locator('option').allTextContents(),options);
+  }
+  await page.locator('#language').selectOption('en');
+  for(const mode of ['light','dark']) {
+    await theme.selectOption(mode);
+    assert.equal(await resolved(), mode);
+    assert.equal(await page.evaluate(() => localStorage.getItem('landrop-theme')), mode);
+    await page.reload();
+    assert.equal(await theme.inputValue(), mode, 'Manual preference survives reload');
+    assert.equal(await resolved(), mode);
+    await page.emulateMedia({colorScheme:mode === 'light' ? 'dark' : 'light'});
+    assert.equal(await resolved(), mode, 'Manual preference ignores system changes');
+    await checkTextContrast(page, `${profileName} ${mode}`);
+  }
+  await theme.selectOption('system');
+  for(const mode of ['light','dark']) {
+    await page.emulateMedia({colorScheme:mode});
+    await until(async () => await resolved() === mode, 'System theme follows a live color-scheme change');
+  }
+  await page.reload();
+  assert.equal(await theme.inputValue(), 'system', 'System preference survives reload');
+  assert.equal(await resolved(), 'dark');
+  await page.evaluate(() => localStorage.setItem('landrop-theme','invalid-theme'));
+  await page.reload();
+  assert.equal(await theme.inputValue(), 'system', 'Invalid stored preference falls back to System');
+  assert.equal(await resolved(), 'dark');
+  await page.locator('#language').focus();
+  await page.keyboard.press('Tab');
+  assert.equal(await theme.evaluate(element => document.activeElement === element), true, 'Theme is reachable with keyboard Tab');
+  const focus = await theme.evaluate(element => {
+    const style=getComputedStyle(element);
+    return {visible:element.matches(':focus-visible'), width:parseFloat(style.outlineWidth), style:style.outlineStyle};
+  });
+  assert.equal(focus.visible,true);
+  assert.ok(focus.width >= 2 && focus.style !== 'none', 'Keyboard focus has a visible outline');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await page.locator('.pulse').evaluate(element => getComputedStyle(element).animationName),'none', 'Reduced-motion removes waiting pulse animation');
+  if(profileName === 'android') {
+    await page.emulateMedia({forcedColors:'active'});
+    assert.equal(await page.evaluate(() => matchMedia('(forced-colors: active)').matches),true);
+    const forcedFocus = await theme.evaluate(element => ({width:parseFloat(getComputedStyle(element).outlineWidth), style:getComputedStyle(element).outlineStyle}));
+    assert.ok(forcedFocus.width >= 2 && forcedFocus.style !== 'none','Forced colors preserves a visible focus outline');
+    await page.emulateMedia({forcedColors:'none'});
+  }
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await theme.selectOption('system');
+  await page.locator('#language').selectOption('en');
+  await page.setViewportSize(portrait);
+}
 async function main(profileName) {
   const profile = profiles[profileName];
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'landrop-mobile-'));
@@ -82,6 +168,14 @@ async function main(profileName) {
     }
     const errors = []; page.on('pageerror', error => errors.push(error.message));
     await page.goto(qr.link);
+    // The pairing form supplies the primary button and editable text input;
+    // later transfer-view checks cover the download and status palettes.
+    await page.locator('#pair').waitFor({state:'visible'});
+    for(const mode of ['light','dark']) {
+      await page.locator('#theme').selectOption(mode);
+      await checkTextContrast(page, `${profileName} ${mode} pairing form`);
+    }
+    await page.locator('#theme').selectOption('system');
     assert.equal(await page.locator('#platform').inputValue(), 'auto');
     assert.equal(await page.locator('#device-name').inputValue(), profile.defaultEn);
     await page.locator('#language').selectOption('cs');
@@ -98,6 +192,8 @@ async function main(profileName) {
     await page.locator('#waiting').waitFor({state:'visible'});
     assert.equal(await page.locator('#transfer').isVisible(), false, 'Unapproved phone cannot select files');
     await api(`/api/admin/devices/${device.id}/approve`, 'POST');
+    await page.locator('#transfer').waitFor({state:'visible'});
+    await checkThemes(page, profileName, devices[profile.device].viewport);
     await page.locator('#transfer').waitFor({state:'visible'});
     assert.equal(await page.locator('#transport-notice').textContent(), tlsCertificate
       ? 'HTTPS connection: file transfers to this computer are encrypted.'
@@ -117,6 +213,12 @@ async function main(profileName) {
     const name = 'Android – příloha 🐎.txt';
     await chooseFiles({name, mimeType:'text/plain', buffer:payload});
     const batch = await until(async () => (await api('/api/admin')).batches.find(b => b.files.some(o => o.name === name)), 'browser hash worker and batch');
+    for(const [language,label] of [['cs','Průběh přenosu'],['en','Transfer progress']]) {
+      await page.locator('#language').selectOption(language);
+      assert.equal(await page.locator('#progress').getAttribute('aria-label'),label);
+      assert.equal(await page.locator('#progress').getAttribute('aria-valuetext'),await page.locator('#progress-text').textContent(),'Accessible progress mirrors visible localized phase');
+      assert.ok((await page.locator('#progress-text').textContent()).length > 0);
+    }
     assert.equal(batch.files[0].size, payload.length);
     assert.equal((await completedNames()).length, 0, 'Nothing is saved before PC accepts');
     await noPendingBytes();
@@ -203,6 +305,12 @@ async function main(profileName) {
     assert.equal(prepared.status, 200, await prepared.text());
     const downloadLink = page.locator('#files a').filter({hasText:'Download'});
     await downloadLink.waitFor();
+    assert.equal(await downloadLink.getAttribute('aria-label'),`Download file ${outgoingName}`,'Download accessible name identifies the file');
+    await downloadLink.focus();
+    const focusKey = await downloadLink.getAttribute('data-focus-key');
+    assert.ok(focusKey?.startsWith('file-download-'));
+    await delay(3100);
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-focus-key')),focusKey,'Polling preserves focus on the same dynamic download action');
     const downloadResponse = await context.request.get(new URL(await downloadLink.getAttribute('href'), browserBase).href);
     assert.equal(downloadResponse.status(), 200);
     const disposition = downloadResponse.headers()['content-disposition'];
@@ -214,6 +322,32 @@ async function main(profileName) {
     assert.equal(await download.failure(), null);
     assert.deepEqual(await fs.readFile(await download.path()), outgoing);
     assert.deepEqual(errors, []);
+    for(const language of ['en','cs']) {
+      await page.locator('#language').selectOption(language);
+      assert.equal(await page.locator('#notice').textContent(),language === 'cs' ? 'Hotovo. Soubory byly úspěšně přeneseny.' : 'Done. Files saved on your computer.','Existing completion notice follows a language change');
+      const savedLabels = await page.locator('#history .row small').allTextContents();
+      assert.ok(savedLabels.length > 0,'Completion history is present');
+      assert.ok(savedLabels.every(label => label === (language === 'cs' ? 'Uloženo na počítači' : 'Saved on computer')),'Existing completion history labels follow a language change');
+      assert.equal(await page.locator('#files a').getAttribute('aria-label'),`${language === 'cs' ? 'Stáhnout soubor' : 'Download file'} ${outgoingName}`,'Localized download accessible name preserves file context');
+      for(const theme of ['light','dark','system']) {
+        await page.locator('#theme').selectOption(theme);
+        await checkTextContrast(page, `${profileName} ${language} ${theme} transfer view`);
+        for(const orientation of ['portrait','landscape']) {
+          await page.setViewportSize(orientation === 'portrait' ? portrait : {width:portrait.height,height:portrait.width});
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),true,`${language} ${theme} ${orientation} fits viewport`);
+          if(process.env.LAN_DROP_SCREENSHOT_DIR) {
+            const directory = path.resolve(process.env.LAN_DROP_SCREENSHOT_DIR);
+            await fs.mkdir(directory,{recursive:true});
+            await page.evaluate(() => scrollTo(0,0));
+            await page.screenshot({path:path.join(directory,`lan-drop-${profileName}-${language}-${theme}-${orientation}.png`),fullPage:true});
+            await page.screenshot({path:path.join(directory,`lan-drop-${profileName}-${language}-${theme}-${orientation}-viewport.png`)});
+          }
+        }
+      }
+    }
+    await page.setViewportSize(portrait);
+    await page.locator('#language').selectOption('en');
+    await page.locator('#theme').selectOption('system');
     if(process.env.LAN_DROP_SCREENSHOT_DIR) {
       const screenshotDirectory = path.resolve(process.env.LAN_DROP_SCREENSHOT_DIR);
       await fs.mkdir(screenshotDirectory, {recursive:true});
@@ -248,7 +382,7 @@ async function main(profileName) {
     const deniedDownload = await page.evaluate(async () => (await fetch(document.querySelector('#files a').href)).status);
     assert.equal(deniedDownload, 401);
     await context.close();
-    console.log(`PASS: ${profileName} (${profile.engine.name()}, ${profile.device} emulation, ${tlsCertificate ? 'trusted HTTPS' : 'HTTP preview'}): EN/CS, portrait/landscape, session reload, approval gate, real hash worker, 20-file consent, saved SHA-256, cancel/clear/reject, offline second-file retry without duplicates, empty/12 MiB binary, exact download bytes/Unicode filename, capability gating and revocation. Physical devices/Safari not tested.`);
+    console.log(`PASS: ${profileName} (${profile.engine.name()}, ${profile.device} emulation, ${tlsCertificate ? 'trusted HTTPS' : 'HTTP preview'}): EN/CS, light/dark/system persistence and media changes, normal-text palette contrast, keyboard focus, reduced motion${profileName === 'android' ? ', forced colors' : ''}, portrait/landscape, session reload, approval gate, real hash worker, 20-file consent, saved SHA-256, cancel/clear/reject, offline second-file retry without duplicates, empty/12 MiB binary, exact download bytes/Unicode filename, capability gating and revocation. Physical devices/Safari and full accessibility audit not tested.`);
   } finally {
     await browser?.close();
     if(!exited && adminKey) {

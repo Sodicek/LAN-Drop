@@ -169,5 +169,12 @@
   "HistoryInbound": "Přijato do PC",
   "HistoryOutbound": "Připraveno pro telefon",
   "HistoryLoading": "Načítání místní historie.",
-  "Error_history_unavailable": "Místní historie není dostupná. Sdílení může pokračovat."
+  "Error_history_unavailable": "Místní historie není dostupná. Sdílení může pokračovat.",
+  "Theme": "Vzhled",
+  "ThemeSystem": "Podle systému",
+  "ThemeLight": "Světlý",
+  "ThemeDark": "Tmavý",
+  "Language": "Jazyk",
+  "PairingQr": "Párovací QR kód",
+  "TransferProgress": "Průběh přenosu souboru"
 }

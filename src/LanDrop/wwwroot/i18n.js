@@ -296,6 +296,20 @@ Object.assign(translations.cs, {
   httpPreview:'Vývojový režim HTTP: síťové přenosy nejsou šifrované. Používej důvěryhodnou privátní síť a testovací soubory bez citlivých údajů.',
   footer:'Soubory se přenášejí přímo v místní síti. Během odesílání nech prohlížeč otevřený a zkontroluj výše uvedený stav připojení.'
 });
+Object.assign(translations.en, {
+  theme:'Theme', themeSystem:'System', themeLight:'Light', themeDark:'Dark', transferProgress:'Transfer progress',
+  approveDevice:'Approve device {device}', rejectDevice:'Reject device {device}', disconnectDevice:'Disconnect device {device}',
+  acceptNamedFile:'Accept file {file} from {device}', rejectNamedFile:'Reject file {file} from {device}',
+  acceptNamedBatch:'Accept all {count} files from {device}', rejectNamedBatch:'Reject {count} files from {device}',
+  unshareNamedFile:'Stop sharing file {file}', hideNamedFile:'Hide file {file}', downloadNamedFile:'Download file {file}'
+});
+Object.assign(translations.cs, {
+  theme:'Vzhled', themeSystem:'Podle systému', themeLight:'Světlý', themeDark:'Tmavý', transferProgress:'Průběh přenosu',
+  approveDevice:'Povolit zařízení {device}', rejectDevice:'Odmítnout zařízení {device}', disconnectDevice:'Odpojit zařízení {device}',
+  acceptNamedFile:'Přijmout soubor {file} ze zařízení {device}', rejectNamedFile:'Odmítnout soubor {file} ze zařízení {device}',
+  acceptNamedBatch:'Přijmout všech {count} souborů ze zařízení {device}', rejectNamedBatch:'Odmítnout {count} souborů ze zařízení {device}',
+  unshareNamedFile:'Zrušit sdílení souboru {file}', hideNamedFile:'Skrýt soubor {file}', downloadNamedFile:'Stáhnout soubor {file}'
+});
 function locale() { return languagePreference === 'auto' ? (navigator.language.toLowerCase().startsWith('cs') ? 'cs' : 'en') : (translations[languagePreference] ? languagePreference : 'en'); }
 function t(key, values = {}) { let text = translations[locale()][key] ?? translations.en[key] ?? key; for(const [name,value] of Object.entries(values)) text = text.replaceAll('{'+name+'}', value); return text; }
 function applyLanguage() { document.documentElement.lang = locale(); document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent=t(el.dataset.i18n)); document.getElementById('language').value = languagePreference; }
