@@ -61,6 +61,16 @@ async function main(profileName) {
     }
     const inbox = path.join(temporary, 'Inbox');
     await api('/api/admin/folder', 'POST', {path:inbox});
+    async function completedNames() {
+      const entries = await fs.readdir(inbox, {withFileTypes:true});
+      for(const entry of entries) assert.ok(entry.isFile() || (entry.isDirectory() && /^\.landrop-incoming-[a-f0-9]{32}$/.test(entry.name)), 'Known inbox entries only');
+      return entries.filter(entry => entry.isFile()).map(entry => entry.name);
+    }
+    async function noPendingBytes() {
+      for(const entry of await fs.readdir(inbox, {withFileTypes:true})) {
+        if(entry.isDirectory()) assert.deepEqual((await fs.readdir(path.join(inbox,entry.name))).sort(), ['.landrop-lease','.landrop-owner'], 'No staged upload bytes before consent/cancel/reject');
+      }
+    }
     const qr = await api('/api/admin/qr?address=127.0.0.1');
     assert.equal(new URL(qr.link).origin, browserBase);
     browser = await profile.engine.launch();
@@ -108,7 +118,8 @@ async function main(profileName) {
     await chooseFiles({name, mimeType:'text/plain', buffer:payload});
     const batch = await until(async () => (await api('/api/admin')).batches.find(b => b.files.some(o => o.name === name)), 'browser hash worker and batch');
     assert.equal(batch.files[0].size, payload.length);
-    assert.equal((await fs.readdir(inbox)).length, 0, 'Nothing is saved before PC accepts');
+    assert.equal((await completedNames()).length, 0, 'Nothing is saved before PC accepts');
+    await noPendingBytes();
     await api(`/api/admin/offer-batches/${batch.id}/approve`, 'POST');
     await page.locator('#history .row').first().waitFor();
     assert.deepEqual(await fs.readFile(path.join(inbox, name)), payload);
@@ -120,7 +131,8 @@ async function main(profileName) {
     await until(async () => (await api('/api/admin')).batches.find(b => b.files.some(o => o.name === 'cancelled-android.txt')), 'cancel batch');
     await page.locator('#cancel').click();
     await until(async () => !(await api('/api/admin')).batches.some(b => b.files.some(o => o.name === 'cancelled-android.txt')), 'batch cancelled');
-    assert.deepEqual(await fs.readdir(inbox), [name]);
+    assert.deepEqual(await completedNames(), [name]);
+    await noPendingBytes();
     await page.locator('#retry').waitFor({state:'visible'});
     await page.locator('#clear-queue').click();
     assert.equal(await page.locator('#queue-list .row').count(), 0);
@@ -131,16 +143,18 @@ async function main(profileName) {
     await api(`/api/admin/offer-batches/${rejected.id}/reject`, 'POST');
     await page.locator('#queue-list [data-state="failed"]').waitFor();
     await page.locator('#retry').waitFor({state:'visible'});
-    assert.deepEqual(await fs.readdir(inbox), [name]);
+    assert.deepEqual(await completedNames(), [name]);
+    await noPendingBytes();
     await page.locator('#clear-queue').click();
     // Twenty selected photos require one PC consent, then preserve every file.
     const photos = Array.from({length:20}, (_, i) => ({name:`batch-photo-${i}.txt`, mimeType:'text/plain', buffer:Buffer.from(`photo ${i} 🐎`)}));
     await chooseFiles(photos);
     const photoBatch = await until(async () => (await api('/api/admin')).batches.find(b => b.files.length === 20), '20-file batch');
     assert.equal(photoBatch.totalSize, photos.reduce((sum, p) => sum + p.buffer.length, 0));
-    assert.equal((await fs.readdir(inbox)).length, 1, 'Batch saves no bytes before consent');
+    assert.equal((await completedNames()).length, 1, 'Batch saves no bytes before consent');
+    await noPendingBytes();
     await api(`/api/admin/offer-batches/${photoBatch.id}/approve`, 'POST');
-    await until(async () => (await fs.readdir(inbox)).length === 21, '20 uploaded photos');
+    await until(async () => (await completedNames()).length === 21, '20 uploaded photos');
     await until(async () => await page.locator('#queue-list [data-state="completed"]').count() === 20, '20 verified browser completions');
     for(const photo of photos) assert.deepEqual(await fs.readFile(path.join(inbox, photo.name)), photo.buffer);
     // Take the browser offline on the second PUT: the first file must not be retried.

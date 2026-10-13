@@ -94,6 +94,8 @@ jobs:
           if-no-files-found: ignore
       - name: Check Windows storage safety
         run: python tests/storage_safety.py
+      - name: Check incomplete incoming recovery after a process crash
+        run: python tests/incoming_recovery.py
       - name: Check network profile policy
         run: dotnet run --project tests/NetworkPolicy -c Release
       - name: Smoke test desktop window

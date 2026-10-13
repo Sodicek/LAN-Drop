@@ -154,5 +154,7 @@
   "ExportDiagnostics": "Uložit anonymní diagnostiku",
   "ExportDiagnosticsHelp": "Uloží místní přehled verzí aplikace, stavu připojení a počtů. Neobsahuje soubory, jména, adresy, hesla ani párovací údaje. Nic se automaticky neodesílá.",
   "DiagnosticExportSaved": "Anonymní diagnostický přehled byl uložen místně. Nic nebylo odesláno.",
-  "DiagnosticExportFailed": "Diagnostický přehled se nepodařilo uložit. Vyber jinou složku nebo zkontroluj přístup do složky."
+  "DiagnosticExportFailed": "Diagnostický přehled se nepodařilo uložit. Vyber jinou složku nebo zkontroluj přístup do složky.",
+  "RecoveryRemoved": "Odstraněno {0} nedokončených přenosů z přerušeného běhu. Dokončené přijaté soubory zůstaly zachované.",
+  "RecoverySkipped": "Některá rozpracovaná data zůstala zachovaná: ještě se používají nebo je nelze bezpečně rozpoznat. Podrobnosti jsou v návodu k zotavení."
 }

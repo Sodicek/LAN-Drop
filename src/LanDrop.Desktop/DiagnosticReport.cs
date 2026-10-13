@@ -20,7 +20,9 @@ sealed record DiagnosticInput(
     bool CertificateExpiringSoon,
     int DeviceCount = 0,
     int PendingRequestCount = 0,
-    int RecentTransferCount = 0);
+    int RecentTransferCount = 0,
+    int RecoveredIncompleteUploads = 0,
+    int RecoverySkippedRuns = 0);
 
 static class DiagnosticReport
 {
@@ -33,7 +35,7 @@ static class DiagnosticReport
         var status = input.CertificateStatus.HasValue ? EnumValue(input.CertificateStatus.Value) : "NotChecked";
         return JsonSerializer.Serialize(new
         {
-            SchemaVersion = 1,
+            SchemaVersion = 2,
             ApplicationVersion = version,
             WindowsVersion = OperatingSystem.IsWindows() ? Environment.OSVersion.Version.ToString() : "NotWindows",
             ProcessArchitecture = EnumValue(RuntimeInformation.ProcessArchitecture),
@@ -45,7 +47,9 @@ static class DiagnosticReport
             CertificateExpiringSoon = input.CertificateStatus == LanDrop.Transport.CertificateStatus.Ready && input.CertificateExpiringSoon,
             DeviceCount = Math.Clamp(input.DeviceCount, 0, 10_000),
             PendingRequestCount = Math.Clamp(input.PendingRequestCount, 0, 10_000),
-            RecentTransferCount = Math.Clamp(input.RecentTransferCount, 0, 200)
+            RecentTransferCount = Math.Clamp(input.RecentTransferCount, 0, 200),
+            RecoveredIncompleteUploads = Math.Clamp(input.RecoveredIncompleteUploads, 0, 10_000),
+            RecoverySkippedRuns = Math.Clamp(input.RecoverySkippedRuns, 0, 10_000)
         }, new JsonSerializerOptions { WriteIndented = true });
     }
 

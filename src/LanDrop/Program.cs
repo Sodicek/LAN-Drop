@@ -76,6 +76,8 @@ StorageSafety.CleanupOutboxes(outboxRoot);
 var outbox = Path.Combine(outboxRoot, Secret()[..12]);
 StorageSafety.CreateFolder(inbox);
 var outboxLease = StorageSafety.CreateRunLease(outbox);
+using var incomingStorage = new IncomingStorage();
+incomingStorage.Prepare(inbox);
 bool IsAdmin(HttpContext c) => c.Connection.RemoteIpAddress is { } remote && IPAddress.IsLoopback(remote) && c.Request.Headers["X-LanDrop-Admin"] == admin;
 Device? GetDevice(HttpContext c) => sessions.TryGetValue(c.Request.Headers["X-LanDrop-Session"].ToString(), out var d) && d.Expires > DateTimeOffset.UtcNow ? d : null;
 bool Allowed(HttpContext c) => IsAdmin(c) || GetDevice(c)?.Approved == true;
@@ -160,7 +162,7 @@ app.MapGet("/api/admin", (HttpContext c) =>
     lock (gate)
     {
         PruneOffers();
-        return Results.Ok(new { inbox, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, secureTransport, httpsPort = secureTransport ? httpsPort : (int?)null, certificateFingerprint, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId, f.Sha256, verified = true }).ToArray(), offers = offers.Values.Where(o => o.BatchId is null && o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray(), batches = batches.Values.Where(b => BatchStatus(b) == "pending").Select(b => new { b.Id, b.DeviceId, b.DeviceName, totalSize = b.OfferIds.Sum(id => offers[id].Size), expires = b.OfferIds.Max(id => offers[id].Expires), files = b.OfferIds.Select(id => { var o = offers[id]; return new { o.Id, o.Name, o.Size }; }).ToArray() }).ToArray(), transfers = transfers.Values.OrderByDescending(t => t.Updated).ToArray() });
+        return Results.Ok(new { inbox, recoveredIncompleteUploads = incomingStorage.RecoveredIncompleteUploads, recoverySkippedRuns = incomingStorage.RecoverySkippedRuns, addresses = Addresses(), listeningAddress, version = typeof(Device).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0], port, secureTransport, httpsPort = secureTransport ? httpsPort : (int?)null, certificateFingerprint, pairingExpires, devices = sessions.Values.Select(d => new { d.Id, d.Name, d.Approved, d.Expires }).ToArray(), files = files.Values.Select(f => new { f.Id, f.Name, f.Size, f.Direction, f.RecipientId, f.Sha256, verified = true }).ToArray(), offers = offers.Values.Where(o => o.BatchId is null && o.Status == "pending").Select(o => new { o.Id, o.Name, o.Size, o.DeviceId, o.DeviceName, o.Status, o.Expires }).ToArray(), batches = batches.Values.Where(b => BatchStatus(b) == "pending").Select(b => new { b.Id, b.DeviceId, b.DeviceName, totalSize = b.OfferIds.Sum(id => offers[id].Size), expires = b.OfferIds.Max(id => offers[id].Expires), files = b.OfferIds.Select(id => { var o = offers[id]; return new { o.Id, o.Name, o.Size }; }).ToArray() }).ToArray(), transfers = transfers.Values.OrderByDescending(t => t.Updated).ToArray() });
     }
 });
 app.MapPost("/api/admin/shutdown", (HttpContext c) => { if (!IsAdmin(c)) return Results.Unauthorized(); c.Response.OnCompleted(() => { app.Lifetime.StopApplication(); return Task.CompletedTask; }); return Results.Ok(); });
@@ -209,6 +211,7 @@ app.MapPost("/api/admin/folder", (HttpContext c, FolderRequest request) =>
     {
         if (!Path.IsPathFullyQualified(request.Path) || request.Path.StartsWith(@"\\")) return Results.BadRequest(Error("invalid_folder", "Choose an absolute local folder path."));
         var path = StorageSafety.CreateFolder(request.Path);
+        incomingStorage.Prepare(path, retryRecovery: true);
         lock (gate) { File.WriteAllText(settingsPath + ".tmp", JsonSerializer.Serialize(new FolderRequest(path))); File.Move(settingsPath + ".tmp", settingsPath, true); inbox = path; }
         return Results.Ok();
     }
@@ -374,12 +377,14 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
     var length = c.Request.ContentLength.Value;
     lock (gate) { if (reservedFiles >= maxRegisteredFiles) { slots.Release(); return Failed("file_limit", "The registered file limit is reached. Remove shared files or restart sharing.", 429); } if (length > maxStoredBytes - reservedBytes) { slots.Release(); return Failed("storage_quota", "The storage quota is exceeded.", 413); } reservedBytes += length; reservedFiles++; }
     Track(transfer);
-    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, owner.Cancellation.Token);
+    using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(c.RequestAborted, owner.Cancellation.Token, app.Lifetime.ApplicationStopping);
     var committed = false; string directory; lock (gate) directory = local ? outbox : inbox;
     string? volume = null; long diskRemaining = 0;
-    var id = Secret()[..16]; var temp = Path.Combine(directory, $".landrop-{id}.part");
+    var id = Secret()[..16]; string? temp = null; string? staging = null;
     try
     {
+        if (!local) staging = incomingStorage.Prepare(directory);
+        temp = local ? Path.Combine(directory, $".landrop-{id}.part") : IncomingStorage.Payload(directory, staging!);
         StorageSafety.ValidateFolder(directory);
         volume = StorageSafety.Volume(directory);
         lock (gate)
@@ -392,6 +397,7 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
             diskRemaining = length;
         }
         StorageSafety.ValidateFolder(directory);
+        if (!local) IncomingStorage.ValidatePayload(directory, staging!, temp, false);
         using var incomingHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, true))
         {
@@ -428,11 +434,13 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
         // Read back the closed temporary file before making it available. This checks
         // the stored bytes, but does not guarantee persistence after power loss.
         StorageSafety.ValidateFolder(directory);
+        if (!local) IncomingStorage.ValidatePayload(directory, staging!, temp, true);
         await using (var saved = new FileStream(temp, FileMode.Open, FileAccess.Read, FileShare.None, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan))
             if (!CryptographicOperations.FixedTimeEquals(await SHA256.HashDataAsync(saved, cancellation.Token), expectedHash)) return Failed("checksum_mismatch", "The saved file checksum does not match. The file was not saved.", 422);
         cancellation.Token.ThrowIfCancellationRequested();
         if (!Allowed(c) || owner.Expires <= DateTimeOffset.UtcNow) return Failed("session_expired", "The device session has expired.", 401);
         StorageSafety.ValidateFolder(directory);
+        if (!local) IncomingStorage.ValidatePayload(directory, staging!, temp, true);
         var final = Path.Combine(directory, name);
         try { File.Move(temp, final); } catch (IOException) when (File.Exists(final)) { final = Path.Combine(directory, $"{Path.GetFileNameWithoutExtension(name)}-{id}{Path.GetExtension(name)}"); File.Move(temp, final); }
         var file = new SharedFile(id, Path.GetFileName(final), final, size, local ? "outbound" : "inbound", owner.Id, checksum.ToLowerInvariant()); files[id] = file; committed = true;
@@ -445,14 +453,33 @@ app.MapPut("/api/files", async (HttpContext c, string name, string? recipient, s
         var code = e switch { UnsafeStorageException => "unsafe_folder", InsufficientDiskSpaceException => "insufficient_disk_space", UnauthorizedAccessException => "folder_access", _ => "storage_failure" };
         transfer = transfer with { Status = "failed", Updated = DateTimeOffset.UtcNow, ErrorCode = code }; Track(transfer); throw;
     }
-    finally { try { StorageSafety.ValidateFolder(directory); if (File.Exists(temp)) File.Delete(temp); } finally { lock (gate) { if (volume is not null && diskRemaining != 0) diskReservations[volume] = diskReservations.GetValueOrDefault(volume) - diskRemaining; } if (!committed) { lock (gate) { reservedBytes -= length; reservedFiles--; } } slots.Release(); } }
+    finally
+    {
+        try
+        {
+            if (temp is not null && File.Exists(temp))
+            {
+                StorageSafety.ValidateFolder(directory);
+                if (!local) IncomingStorage.ValidatePayload(directory, staging!, temp, true);
+                if ((File.GetAttributes(temp) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0) throw new UnsafeStorageException();
+                File.Delete(temp);
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or UnsafeStorageException) { } // Recover later; never mask a committed receipt.
+        finally
+        {
+            lock (gate) { if (volume is not null && diskRemaining != 0) diskReservations[volume] = diskReservations.GetValueOrDefault(volume) - diskRemaining; }
+            if (!committed) { lock (gate) { reservedBytes -= length; reservedFiles--; } }
+            slots.Release();
+        }
+    }
 });
 app.MapGet("/api/files/{id}", (HttpContext c, string id) => { if (!Allowed(c)) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || (!IsAdmin(c) && f.RecipientId != GetDevice(c)?.Id) || !File.Exists(f.Path)) return Results.NotFound(); return DownloadFile(c, f); });
 app.MapDelete("/api/admin/files/{id}", (HttpContext c, string id) => { if (!IsAdmin(c)) return Results.Unauthorized(); lock (gate) { if (files.TryGetValue(id, out var f)) { if (f.Direction == "outbound") File.Delete(f.Path); if (files.TryRemove(id, out _)) { if (f.Direction == "outbound") reservedBytes -= f.Size; reservedFiles--; } } } return Results.Ok(); });
 app.MapPost("/api/download-session", (HttpContext c) => { if (GetDevice(c)?.Approved != true) return Results.Unauthorized(); c.Response.Cookies.Append("landrop-download", c.Request.Headers["X-LanDrop-Session"].ToString(), new CookieOptions { HttpOnly = true, Secure = secureTransport, SameSite = SameSiteMode.Strict, MaxAge = TimeSpan.FromHours(8), Path = "/download" }); return Results.Ok(); });
 app.MapGet("/download/{id}", (HttpContext c, string id) => { if (!sessions.TryGetValue(c.Request.Cookies["landrop-download"] ?? "", out var d) || !d.Approved || d.Expires <= DateTimeOffset.UtcNow) return Results.Unauthorized(); if (!files.TryGetValue(id, out var f) || f.Direction != "outbound" || f.RecipientId != d.Id || !File.Exists(f.Path)) return Results.NotFound(); return DownloadFile(c, f); });
 app.Lifetime.ApplicationStarted.Register(() => { var url = $"http://127.0.0.1:{port}/#admin={admin}"; Console.WriteLine($"LAN Drop administration: {url}"); if (builder.Configuration.GetValue("OpenBrowser", true)) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); });
-app.Lifetime.ApplicationStopped.Register(() => { outboxLease.Dispose(); try { StorageSafety.CleanupRun(outbox); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or UnsafeStorageException or JsonException) { } });
+app.Lifetime.ApplicationStopped.Register(() => { incomingStorage.Dispose(); outboxLease.Dispose(); try { StorageSafety.CleanupRun(outbox); } catch (Exception e) when (e is IOException or UnauthorizedAccessException or UnsafeStorageException or JsonException) { } });
 app.Run();
 record PairRequest(string Code, string? Name);
 record FolderRequest(string Path);

@@ -12,6 +12,8 @@ Klikni na **Uložit anonymní diagnostiku**, vyber místní soubor JSON a před 
 
 Souhrn obsahuje verzi aplikace, Windows, architekturu a verzi .NET, stav sdílení, režim HTTPS/HTTP, kategorii síťového profilu, výsledek kontroly certifikátu, upozornění na končící platnost a počty zařízení, žádostí a posledních přenosů.
 
+Schéma 2 přidává omezené počty odstraněných nedokončených přenosů a zachovaných pracovních adresářů. Jejich názvy a cesty neobsahuje. Podrobnosti jsou v [návodu k zotavení](RECOVERY.md).
+
 Neobsahuje adresy, názvy sítí, počítače, uživatele nebo zařízení, cesty ani názvy souborů, jejich obsah nebo velikosti, otisky certifikátů, hesla, párovací odkazy, přístupové tokeny, výpisy serveru ani texty výjimek. Nezkontrolovaný certifikát má stav **NotChecked**. Souhrn není testem dostupnosti telefonu ani historií přenosů.
 
 Do veřejného hlášení nepřikládej výpis serveru, uložená nastavení nebo soukromé certifikáty. Podrobnosti jsou v [bezpečnostních zásadách](../../SECURITY.md) a [anglickém návodu](../DIAGNOSTICS.md).

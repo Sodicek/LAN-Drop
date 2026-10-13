@@ -17,6 +17,7 @@
   <TextBlock x:Name="Subtitle" FontSize="17"/>
   <TextBlock x:Name="Status" Foreground="#C2F970" AutomationProperties.LiveSetting="Polite"/>
   <TextBlock x:Name="SecurityNote" Foreground="#D6B86A"/>
+  <TextBlock x:Name="RecoveryNotice" Foreground="#D6B86A" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite"/>
   <GroupBox x:Name="ConnectionGroup">
    <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="240"/></Grid.ColumnDefinitions>
     <StackPanel>

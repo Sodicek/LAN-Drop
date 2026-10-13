@@ -16,6 +16,7 @@ The report includes only an explicit list of fields:
 - Sharing state, HTTPS/HTTP preview mode and selected network profile category.
 - Certificate check status and whether a successfully checked certificate expires soon.
 - Counts of connected/requesting devices, pending requests and recent transfers.
+- Diagnostic schema 2 also includes bounded counts of discarded incomplete uploads and preserved staging runs; no staging names or paths.
 
 The report excludes addresses, network/PC/user/device names, source/destination/certificate paths, filenames, file sizes or contents, certificate fingerprints, passwords, pairing links, session/admin tokens, logs and exception messages. It has no transfer history or reachability test. An unchecked certificate is recorded as **NotChecked**. This is a small troubleshooting summary, not a guarantee of phone compatibility.
 

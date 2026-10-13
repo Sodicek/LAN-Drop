@@ -137,16 +137,27 @@ with tempfile.TemporaryDirectory(prefix="landrop-storage-") as directory:
         # Revalidate a selected folder at upload admission, not just in the picker.
         selected = root / "selected"; selected.mkdir()
         cleaner.folder(selected)
-        selected.rmdir()
-        result = subprocess.run(["cmd", "/c", "mklink", "/J", str(selected), str(target)], capture_output=True)
-        assert result.returncode == 0, result.stderr
+        # Keep the live owned stage intact while replacing the selected ancestor.
+        # The folder is no longer empty now that incoming recovery owns a lease.
+        displaced = root / "selected-original"
         try:
-            cleanerphone, _ = cleaner.phone()
-            assert cleaner.upload("redirected.bin", b"x", cleanerphone, 400)["code"] == "unsafe_folder"
+            selected.rename(displaced)
+        except PermissionError:
+            # Windows denies ancestor replacement while the exclusive lease is
+            # open: the attempted redirect is blocked before upload admission.
+            assert os.name == "nt" and selected.is_dir() and not displaced.exists()
             assert not (target / "redirected.bin").exists()
+        else:
+            result = subprocess.run(["cmd", "/c", "mklink", "/J", str(selected), str(target)], capture_output=True)
+            assert result.returncode == 0, result.stderr
+            try:
+                cleanerphone, _ = cleaner.phone()
+                assert cleaner.upload("redirected.bin", b"x", cleanerphone, 400)["code"] == "unsafe_folder"
+                assert not (target / "redirected.bin").exists()
+            finally:
+                os.rmdir(selected)
+                displaced.rename(selected)
         finally:
-            os.rmdir(selected)
-            selected.mkdir()
             cleaner.folder(inbox)
 
         disk = Server(data, DiskSafetyBufferBytes=9223372036854775807); servers.append(disk)
@@ -158,7 +169,7 @@ with tempfile.TemporaryDirectory(prefix="landrop-storage-") as directory:
         replay = disk.request(disk_path, "PUT", b"x", diskphone, 409)
         assert replay["code"] == "offer_not_approved"
         assert not (inbox / "no-space.bin").exists()
-        assert not list(inbox.glob("*.part"))
+        assert not list(inbox.rglob("*.part"))
         # A failed integrity check must release both the byte quota and record slot.
         quota = Server(data, MaxStoredBytes=4, MaxRegisteredFiles=1); servers.append(quota)
         quotaphone, quotarecipient = quota.phone()

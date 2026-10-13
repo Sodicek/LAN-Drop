@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0-rc.4 — 2026-10-13
+
+### Added
+- Owned incoming staging with exclusive run leases and best-effort cleanup after a process crash.
+- Recovery during startup and receive-folder selection, preserving completed files, live runs, legacy partial files and unknown/unsafe staging.
+- Folder switching that retains each active upload's original destination.
+- English/Czech recovery notices and anonymous bounded recovery counters in diagnostic schema 2.
+- Real partial-upload/crash/restart tests and live-run, ownership and unsafe-entry preservation checks.
+
+### Known gaps
+- Cleanup covers selected folders and a bounded number of candidates; it does not search every historical destination or resume discarded uploads.
+- A crash after a completed move but before a response can leave a complete file without sender confirmation; inspect the folder before retrying.
+- Hostile local path replacement, power-loss durability, physical phone/network recovery and clean Windows remain unverified.
+
 ## 0.2.0-rc.3 — 2026-10-13
 
 ### Added

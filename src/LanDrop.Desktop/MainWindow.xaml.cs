@@ -268,7 +268,8 @@ public partial class MainWindow : Window
         var encrypted = server is null ? SecureHttps.IsChecked == true : secureSharing;
         return new DiagnosticInput(sharing,encrypted ? DiagnosticTransport.Https : DiagnosticTransport.HttpPreview,diagnosticProfile,
             certificateInspection?.Status,certificateInspection?.ExpiringSoon == true,lastState?.Devices.Length ?? 0,
-            (lastState?.Offers?.Length ?? 0)+(lastState?.Batches?.Length ?? 0),lastState?.Transfers?.Length ?? 0);
+            (lastState?.Offers?.Length ?? 0)+(lastState?.Batches?.Length ?? 0),lastState?.Transfers?.Length ?? 0,
+            lastState?.RecoveredIncompleteUploads ?? 0,lastState?.RecoverySkippedRuns ?? 0);
     }
     private void SaveDiagnosticReport(string path) => File.WriteAllText(path,DiagnosticReport.Create(BuildDiagnosticInput()));
     private void ExportDiagnostics(object sender,RoutedEventArgs e)
@@ -604,6 +605,11 @@ public partial class MainWindow : Window
     }
     private void RenderState(ServerState state)
     {
+        var recovery = new List<string>();
+        if(state.RecoveredIncompleteUploads > 0) recovery.Add(string.Format(CultureInfo.CurrentCulture,T("RecoveryRemoved"),state.RecoveredIncompleteUploads));
+        if(state.RecoverySkippedRuns > 0) recovery.Add(T("RecoverySkipped"));
+        RecoveryNotice.Text = string.Join("\n",recovery);
+        RecoveryNotice.Visibility = recovery.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         FolderText.Text = state.Inbox;
         renderingState = true;
         var selected = Recipient.SelectedValue as string;
@@ -818,6 +824,7 @@ public partial class MainWindow : Window
             owned.Dispose();
         }
         baseUrl = adminKey = null; lastState = null; DevicesPanel.Children.Clear(); OffersPanel.Children.Clear(); FilesPanel.Children.Clear(); TransfersPanel.Children.Clear(); Recipient.ItemsSource = null;
+        RecoveryNotice.Text = ""; RecoveryNotice.Visibility = Visibility.Collapsed;
         TransferFolderButton.IsEnabled = false; UpdateRetry();
         StartButton.IsEnabled = Network.IsEnabled = true; StopButton.IsEnabled = ChooseFolderButton.IsEnabled = OpenFolderButton.IsEnabled = NewQrButton.IsEnabled = SendButton.IsEnabled = CopyLinkButton.IsEnabled = false;
         Status.Text = T("Stopped"); stopping = false;
@@ -838,7 +845,7 @@ record OfferInfo(string Id,string Name,long Size,string DeviceId,string DeviceNa
 record BatchFileInfo(string Id,string Name,long Size);
 record BatchInfo(string Id,string DeviceId,string DeviceName,long TotalSize,DateTimeOffset Expires,BatchFileInfo[] Files);
 record TransferInfo(string Id,string Name,long Size,string DeviceId,string DeviceName,string Direction,string Status,long BytesTransferred,DateTimeOffset Updated,string? ErrorCode = null,string? FileId = null);
-record ServerState(string Inbox,DeviceInfo[] Devices,FileInfoDto[] Files,OfferInfo[]? Offers = null,BatchInfo[]? Batches = null,TransferInfo[]? Transfers = null);
+record ServerState(string Inbox,DeviceInfo[] Devices,FileInfoDto[] Files,OfferInfo[]? Offers = null,BatchInfo[]? Batches = null,TransferInfo[]? Transfers = null,int RecoveredIncompleteUploads = 0,int RecoverySkippedRuns = 0);
 
 sealed class ProgressReadStream(Stream inner,Action<long> progress) : Stream
 {

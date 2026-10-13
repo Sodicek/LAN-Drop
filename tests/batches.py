@@ -88,7 +88,10 @@ try:
     first = batch["offers"][0]
     upload = "/api/files?" + urllib.parse.urlencode({"name":first["name"],"offer":first["id"]})
     request(upload, "PUT", payloads[0], owner, 409, raw=True)
-    assert not list(inbox.iterdir()), "No file body may be saved before consent"
+    assert not list(inbox.glob("*.part")) and not list(inbox.rglob(".upload-*.part")), "No upload body may be staged before consent"
+    for entry in inbox.iterdir():
+        assert entry.is_dir() and entry.name.startswith(".landrop-incoming-"), "No completed file before consent"
+        assert {p.name for p in entry.iterdir()} == {".landrop-owner", ".landrop-lease"}, "Only staging metadata before consent"
     request(f"/api/admin/offer-batches/{identifier}/approve", "POST", headers=owner, expected=401)
     request(f"/api/admin/offers/{first['id']}/approve", "POST", headers=admin, expected=409)
     request(f"/api/admin/offer-batches/{identifier}/approve", "POST", headers=admin)

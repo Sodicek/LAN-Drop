@@ -75,6 +75,14 @@ def assert_verified(value, payload):
     assert value["sha256"] == hashlib.sha256(payload).hexdigest(), value
     assert value["verified"] is True, value
 
+def assert_no_upload_bytes(directory):
+    # Startup/folder selection may create an owned empty staging directory.
+    # Pairing and offer rejection must never write file payloads.
+    path = Path(directory)
+    for stage in path.iterdir():
+        assert stage.is_dir() and re.fullmatch(r"\.landrop-incoming-[a-f0-9]{32}", stage.name)
+        assert {p.name for p in stage.iterdir()} == {".landrop-owner", ".landrop-lease"}, "No payload bytes may be saved before approval"
+
 try:
     deadline = time.monotonic() + 20
     admin_key = None
@@ -139,7 +147,7 @@ try:
         offer_path = f"/api/files?name=approval.txt&offer={pending_offer}"
         failure = json.loads(request(offer_path, "PUT", b"x", session, 409)[0])
         assert failure["code"] == "offer_not_approved"
-        assert not list(Path(directory).iterdir()), "No bytes may be saved before approval"
+        assert_no_upload_bytes(directory)
         pending_list = obj("/api/admin", headers=admin)["offers"]
         shown = next(item for item in pending_list if item["id"] == pending_offer)
         assert shown["name"] == "approval.txt" and shown["size"] == 1
@@ -162,7 +170,7 @@ try:
         request(f"/api/offers/{canceled_offer}", "DELETE", headers=session)
         assert obj(f"/api/offers/{canceled_offer}", headers=session)["status"] == "rejected"
         request(f"/api/files?name=canceled.txt&offer={canceled_offer}", "PUT", b"x", session, 409)
-        assert not list(Path(directory).iterdir())
+        assert_no_upload_bytes(directory)
         for invalid in ["../escape.txt", "CON", "con.txt", "trailing."]:
             result = obj("/api/offers", "POST", {"name": invalid, "size": 1}, session, 400)
             assert result["code"] == "invalid_filename"
@@ -183,14 +191,14 @@ try:
             assert failure["code"] == "checksum_required"
             assert obj(f"/api/offers/{digest_offer}", headers=session)["status"] == "approved"
             assert not (Path(directory)/"digest.bin").exists()
-            assert not list(Path(directory).glob("*.part"))
+            assert not list(Path(directory).rglob("*.part"))
         # Same-length corruption is caught by content hashing, not just file size.
         failure = json.loads(request(digest_path, "PUT", b"evil", {**session, "X-LanDrop-SHA256": hashlib.sha256(b"good").hexdigest()}, 422)[0])
         assert failure["code"] == "checksum_mismatch"
         assert obj(f"/api/offers/{digest_offer}", headers=session)["status"] == "consumed"
         assert json.loads(request(digest_path, "PUT", b"good", session, 409)[0])["code"] == "offer_not_approved"
         assert not (Path(directory)/"digest.bin").exists()
-        assert not list(Path(directory).glob("*.part"))
+        assert not list(Path(directory).rglob("*.part"))
         assert obj("/api/admin", headers=admin)["files"] == []
         outbound_path = f"/api/files?name=corrupted-outbound.bin&recipient={device}"
         for digest in [None, "broken"]:
@@ -243,15 +251,15 @@ try:
         # and a later creation races the cleanup assertion.
         try:
             deadline = time.monotonic() + 5
-            while not list(Path(directory).glob("*.part")) and time.monotonic() < deadline:
+            while not list(Path(directory).rglob("*.part")) and time.monotonic() < deadline:
                 time.sleep(.05)
-            assert list(Path(directory).glob("*.part")), "Interrupted request never started storing bytes"
+            assert list(Path(directory).rglob("*.part")), "Interrupted request never started storing bytes"
         finally:
             conn.close()
         deadline = time.monotonic() + 5
-        while list(Path(directory).glob("*.part")) and time.monotonic() < deadline:
+        while list(Path(directory).rglob("*.part")) and time.monotonic() < deadline:
             time.sleep(.05)
-        assert not list(Path(directory).glob("*.part"))
+        assert not list(Path(directory).rglob("*.part"))
         assert not (Path(directory)/"interrupted.bin").exists()
         request(f"/api/files?name=interrupted.bin&offer={interrupted_offer}", "PUT", b"x" * 1000000, session, 409)
         request("/api/files?name=missing-recipient.bin","PUT",payload,admin,400)

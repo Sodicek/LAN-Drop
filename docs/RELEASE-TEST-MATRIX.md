@@ -13,8 +13,9 @@
 | Manual diagnostic summary privacy | Typed report helper and native window | Automated: `tests/Diagnostics` and desktop lifecycle; explicit field whitelist |
 | Chromium phone profile over trusted HTTPS | Disposable Windows GitHub Actions runner | Automated: `tests/Run-TrustedBrowser.ps1`; CI-only test root is removed afterward; no local trust mutation |
 | Native window and child-server startup/shutdown | Windows development host and CI | Automated desktop smoke and lifecycle checks |
-| Self-contained portable package lifecycle | Windows development host with SDK/runtime discovery removed from PATH and DOTNET_ROOT | Passed: `python tests/desktop_lifecycle.py --executable publish/LAN-Drop-0.2.0-rc.3-win-x64/LanDrop.Desktop.exe --without-sdk`, including HTTPS preflight, expiry shutdown and private diagnostics; does not replace a clean-machine test |
+| Self-contained portable package lifecycle | Windows development host with SDK/runtime discovery removed from PATH and DOTNET_ROOT | Passed: `python tests/desktop_lifecycle.py --executable publish/LAN-Drop-0.2.0-rc.4-win-x64/LanDrop.Desktop.exe --without-sdk`, including HTTPS preflight, expiry shutdown and private diagnostics; does not replace a clean-machine test |
 | Safe storage paths, disk shortage, stale outbox ownership | Windows development host and CI | Automated: `python tests/storage_safety.py` |
+| Incoming partial upload, forced process termination/restart, preserved completed files and live leases | Real isolated Windows server processes | Passed: `python tests/incoming_recovery.py`; includes folder switching, same-folder retry and malformed/foreign/nested/linked/locked preservation; not power-loss testing |
 | Android Chrome on a real phone | Private LAN and Windows PC | **Not run; release gate** |
 | iPhone Safari on a real phone | Private LAN and Windows PC | **Not run; release gate** |
 | Portable package without installed .NET or developer tools | Clean supported Windows machine | **Not run; release gate** |
@@ -35,5 +36,6 @@ Record the Windows version, app version, phone model, OS/browser versions, trans
 7. Sleep/wake Windows, background/restore the phone browser, and switch the PC network to Public. Confirm safe stop and a clear reconnect path.
 8. Repeat EN and CS, revoke the device, and verify old session/download access fails.
 9. Reject an untrusted authority, an expired certificate and a changed IP address. Confirm that no certificate-warning bypass or HTTP fallback is needed. Replace the identity and its specific phone trust, then repeat a transfer.
+10. Interrupt an upload by terminating its isolated test application, restart and inspect [recovery](RECOVERY.md). Verify completed files are preserved and only owned inactive staging is discarded. Check for a completed file before retrying if the confirmation was lost.
 
 Fill in actual results before promoting a candidate to a stable release; do not mark an unperformed check as passed.

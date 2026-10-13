@@ -154,5 +154,7 @@
   "ExportDiagnostics": "Save anonymous diagnostics",
   "ExportDiagnosticsHelp": "Saves a local summary of app versions, connection state and counts. Contains no files, names, addresses, passwords or pairing details. Nothing is sent automatically.",
   "DiagnosticExportSaved": "Anonymous diagnostic summary saved locally. Nothing was sent.",
-  "DiagnosticExportFailed": "Could not save the diagnostic summary. Choose another folder or check folder access."
+  "DiagnosticExportFailed": "Could not save the diagnostic summary. Choose another folder or check folder access.",
+  "RecoveryRemoved": "Removed {0} incomplete uploads left by an interrupted run. Completed received files were kept.",
+  "RecoverySkipped": "Some unfinished data was left untouched because it is still in use or could not be safely identified. See the recovery guide."
 }

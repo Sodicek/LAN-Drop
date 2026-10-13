@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-rc.3**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
+Current build: **0.2.0-rc.4**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -11,7 +11,8 @@ Current build: **0.2.0-rc.3**. A release candidate does not mean every release g
 - [x] Empty files and reserved Windows names.
 - [x] Two-device authorization tests.
 - [x] Owned outbox crash cleanup, reparse-point checks and free-space checks.
-- [ ] Incomplete inbox recovery after a crash and stronger atomic path handling.
+- [x] Owned incomplete inbox staging recovery after a process crash.
+- [ ] Atomic path handling against hostile local replacement.
 - [ ] Physical iPhone: 20 photos to PC and a video back.
 - [ ] Physical Android/Chrome: photos, videos, documents, Downloads and interrupted transfers.
 - [x] Desktop start-time network profile gate.
@@ -44,7 +45,8 @@ Current build: **0.2.0-rc.3**. A release candidate does not mean every release g
 - [x] Upload checksums, stored-file readback and matching completion receipts.
 - [ ] Independently verified phone downloads and large-file performance measurements.
 - [x] Concurrent disk-space reservation and owned outbox cleanup.
-- [ ] Transfer restart recovery.
+- [x] Discard inactive owned incoming staging on restart or destination selection; preserve completed files.
+- [ ] Transfer continuation and persistent retry state after restart.
 
 ## 0.4.0 — offers and secure transport
 - [x] Per-file receive offers with explicit approval, rejection and cancellation.

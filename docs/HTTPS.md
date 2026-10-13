@@ -1,6 +1,6 @@
 # HTTPS setup
 
-The Windows app defaults to HTTPS for phone connections in 0.2.0-rc.3. Its administration channel remains authenticated HTTP on loopback only. The desktop chooses separate available ports and the phone's QR includes the HTTPS port. The browser-only server defaults to administration port 45821 and HTTPS port 45822. Secure mode does not expose a plaintext LAN listener or fall back to HTTP after a certificate error.
+The Windows app defaults to HTTPS for phone connections in 0.2.0-rc.4. Its administration channel remains authenticated HTTP on loopback only. The desktop chooses separate available ports and the phone's QR includes the HTTPS port. The browser-only server defaults to administration port 45821 and HTTPS port 45822. Secure mode does not expose a plaintext LAN listener or fall back to HTTP after a certificate error.
 
 HTTPS requires the phone to trust the certificate authority that issued the PC's certificate. A QR code alone cannot establish that trust. The app neither installs a root certificate nor bypasses browser certificate checks. Physical Android/iPhone setup remains unverified; this candidate is not a stable compatibility guarantee.
 
