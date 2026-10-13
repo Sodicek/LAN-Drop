@@ -1,6 +1,6 @@
 # Roadmap
 
-Current build: **0.2.0-rc.2**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
+Current build: **0.2.0-rc.3**. A release candidate does not mean every release gate has passed; see `docs/RELEASE-TEST-MATRIX.md`.
 
 ## 0.1.1 — prototype hardening
 - [x] Recipient-specific outbound lists, API access and Safari-cookie downloads.
@@ -32,6 +32,7 @@ Current build: **0.2.0-rc.2**. A release candidate does not mean every release g
 - [x] Better server-start diagnosis and network profile information.
 - [x] Automated desktop/server start, folder selection and shutdown check.
 - [x] HTTPS default, local IP certificate creation/selection, session-only password and EN/CS trust setup help.
+- [x] Certificate preflight, expiry warnings and verified public authority details after restart.
 - [x] Strict TLS integration checks and Chromium/WebKit emulation with exact Unicode download names.
 - [ ] Shared Core/Transport modules and typed client.
 - [ ] Theme selection and full accessibility verification.
@@ -55,7 +56,7 @@ Current build: **0.2.0-rc.2**. A release candidate does not mean every release g
 
 ## 0.5.0-beta — distribution
 - [ ] Installer and code signing.
-- [ ] Diagnostic export with redaction.
+- [x] Manual diagnostic export with a strict anonymous field whitelist.
 - [ ] Clean-machine portable/install/upgrade tests.
 - [x] Portable ZIP/checksum packaging and a physical release-test matrix.
 - [ ] Real Android/iOS/network compatibility matrix.

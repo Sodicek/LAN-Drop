@@ -1,6 +1,6 @@
 # Nastavení HTTPS
 
-Ve verzi 0.2.0-rc.2 je ve Windows předvolené HTTPS pro připojení telefonů. Místní správa aplikace používá ověřené spojení pouze uvnitř počítače. Při chybě certifikátu se sdílení samo nepřepne na HTTP.
+Ve verzi 0.2.0-rc.3 je ve Windows předvolené HTTPS pro připojení telefonů. Místní správa aplikace používá ověřené spojení pouze uvnitř počítače. Při chybě certifikátu se sdílení samo nepřepne na HTTP.
 
 1. Vyber privátní/doménové připojení a nech HTTPS zapnuté.
 2. Zadej nové heslo certifikátu alespoň o dvanácti znacích. Vytvoř místní certifikát a vyber nové umístění souboru `.pfx` na PC.
@@ -10,6 +10,8 @@ Ve verzi 0.2.0-rc.2 je ve Windows předvolené HTTPS pro připojení telefonů. 
 6. Spusť sdílení, načti HTTPS QR a schval telefon na PC. Varování prohlížeče neobcházej; zkontroluj důvěru, adresu, platnost a certifikát.
 
 Aplikace uloží cestu k certifikátu a volbu HTTPS, heslo zůstává pouze v aktuální relaci. Po novém spuštění ho zadej znovu. Vytvořený certifikát platí třicet dní a jen pro vybranou IP adresu. Při změně adresy nebo obnově vytvoř nový certifikát a ručně nahraď jeho veřejnou autoritu v telefonu. Soukromý klíč autority se neukládá, takže starou autoritu nelze použít k obnově.
+
+Tlačítko **Zkontrolovat certifikát** ukáže platnost a adresy a vysvětlí případnou chybu. Stejná kontrola proběhne před spuštěním sdílení. Po restartu obnoví údaje veřejné autority pouze po ověření, že patří k serverovému certifikátu. Výsledek nepotvrzuje důvěru telefonu. Při zbývajících sedmi dnech nebo méně se zobrazí upozornění; pravidelná kontrola během sdílení po vypršení sdílení zastaví. Podrobnosti jsou v [návodu k diagnostice](DIAGNOSTICS.md).
 
 Windows dočasně používá své kryptografické úložiště pro soukromý klíč serveru; aplikace sama nepřidává autority mezi důvěryhodné certifikáty. Běžné ukončení klíč uvolní, násilné ukončení může zanechat záznam poskytovatele. Při vyřazení certifikátu odeber v telefonu pouze tuto konkrétní autoritu, nemaž ostatní přihlašovací údaje.
 

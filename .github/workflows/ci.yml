@@ -63,6 +63,8 @@ jobs:
         run: dotnet run --project tests/DesktopQueue -c Release
       - name: Check transport certificates without installing trust roots
         run: dotnet run --project tests/Transport -c Release
+      - name: Check anonymous diagnostic export
+        run: dotnet run --project tests/Diagnostics -c Release
       - name: Check real validated HTTPS transfers
         run: python tests/secure_transport.py
       - name: Run HTTP integration checks

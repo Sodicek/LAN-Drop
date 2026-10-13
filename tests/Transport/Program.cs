@@ -19,6 +19,26 @@ void Reject(Action operation, string message)
     try { operation(); } catch (Exception) { return; }
     throw new Exception("Expected rejection: " + message);
 }
+CertificateInspection InspectStatus(string path, string passphrase, string address, CertificateStatus expected)
+{
+    var result = CertificateTools.InspectServerCertificate(path, passphrase, address);
+    Check(result.Status == expected, $"Expected {expected}, got {result.Status}.");
+    if (expected != CertificateStatus.Ready)
+    {
+        Check(result.NotAfterUtc is null && !result.ExpiringSoon && result.Fingerprint is null &&
+            result.IpAddresses.Count == 0 && result.Authority is null, "Rejected inspection must expose no certificate metadata.");
+        try { using var loaded = CertificateTools.LoadServerCertificate(path, passphrase, address); }
+        catch (CertificateValidationException error)
+        {
+            Check(error.Status == expected && error.InnerException is null, "Load must expose the same safe status without provider detail.");
+            Check(!error.Message.Contains(path, StringComparison.OrdinalIgnoreCase) &&
+                (passphrase.Length == 0 || !error.Message.Contains(passphrase, StringComparison.Ordinal)), "Errors must not include a path or password.");
+            return result;
+        }
+        throw new Exception("Invalid certificate passed runtime validation.");
+    }
+    return result;
+}
 string[] TrustedRoots()
 {
     var roots = new List<string>();
@@ -58,6 +78,35 @@ try
     chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
     chain.ChainPolicy.ApplicationPolicy.Add(new Oid("1.3.6.1.5.5.7.3.1"));
     Check(chain.Build(server), "Generated TLS certificate must validate against its exported CA.");
+    var inspection = InspectStatus(path, password, "127.0.0.1", CertificateStatus.Ready);
+    Check(inspection.NotAfterUtc == new DateTimeOffset(server.NotAfter.ToUniversalTime()) && !inspection.ExpiringSoon,
+        "Ready inspection must report validated leaf expiry and the seven-day renewal warning.");
+    Check(inspection.Fingerprint == CertificateTools.Fingerprint(server) && inspection.IpAddresses.SequenceEqual(new[] { "127.0.0.1" }),
+        "Ready inspection must report the actual leaf fingerprint and IP SAN.");
+    Check(inspection.Authority?.Path == generated.AuthorityPath && inspection.Authority.Fingerprint == generated.AuthorityFingerprint,
+        "Inspection must recover verified adjacent public CA metadata after generation has returned.");
+    InspectStatus(path, "", "127.0.0.1", CertificateStatus.PasswordRequired);
+    InspectStatus(path, "wrong-password", "127.0.0.1", CertificateStatus.UnreadableOrInvalid);
+    InspectStatus(path, password, "127.0.0.2", CertificateStatus.AddressMismatch);
+    InspectStatus(path, password, "0.0.0.0", CertificateStatus.InvalidAddress);
+    InspectStatus(Path.Combine(directory, "missing.pfx"), password, "127.0.0.1", CertificateStatus.MissingFile);
+    var publicAuthorityBytes = File.ReadAllBytes(generated.AuthorityPath);
+    File.Delete(generated.AuthorityPath);
+    Check(InspectStatus(path, password, "127.0.0.1", CertificateStatus.Ready).Authority is null,
+        "Missing companion CA must not invalidate an otherwise valid external leaf or claim phone trust.");
+    File.WriteAllBytes(generated.AuthorityPath, server.RawData);
+    Check(InspectStatus(path, password, "127.0.0.1", CertificateStatus.Ready).Authority is null,
+        "A public leaf renamed as the CA must not be exposed as a trust certificate.");
+    var unrelated = CertificateTools.Generate(Path.Combine(directory, "unrelated.pfx"), "127.0.0.1", password);
+    File.WriteAllBytes(generated.AuthorityPath, File.ReadAllBytes(unrelated.AuthorityPath));
+    Check(InspectStatus(path, password, "127.0.0.1", CertificateStatus.Ready).Authority is null,
+        "Matching filenames and subjects cannot replace actual chain verification.");
+    File.WriteAllBytes(generated.AuthorityPath, File.ReadAllBytes(path));
+    Check(InspectStatus(path, password, "127.0.0.1", CertificateStatus.Ready).Authority is null,
+        "A private-key container renamed as a public CA must never be exposed.");
+    File.WriteAllBytes(generated.AuthorityPath, publicAuthorityBytes);
+    Check(InspectStatus(path, password, "127.0.0.1", CertificateStatus.Ready).Authority?.Fingerprint == generated.AuthorityFingerprint,
+        "Only restoring the real public issuer should restore companion metadata.");
     var original = File.ReadAllBytes(path);
     Reject(() => CertificateTools.Generate(path, "127.0.0.1", password), "Existing key must not be overwritten.");
     Check(File.ReadAllBytes(path).SequenceEqual(original), "Rejected overwrite changed the original key.");
@@ -81,11 +130,13 @@ try
     var invalid = Path.Combine(directory, "invalid.pfx");
     File.WriteAllText(invalid, "not a certificate");
     Reject(() => CertificateTools.LoadServerCertificate(invalid, password, "127.0.0.1"), "Malformed certificate.");
-    void InvalidFixture(string name, DateTimeOffset start, DateTimeOffset end, bool privateKey = true, bool serverAuth = true, string address = "127.0.0.1")
+    InspectStatus(invalid, password, "127.0.0.1", CertificateStatus.UnreadableOrInvalid);
+    void InvalidFixture(string name, DateTimeOffset start, DateTimeOffset end, CertificateStatus expected,
+        bool privateKey = true, bool serverAuth = true, string address = "127.0.0.1", bool isAuthority = false)
     {
         using var key = RSA.Create(2048);
         var request = new CertificateRequest("CN=LAN Drop isolated invalid fixture", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(isAuthority, isAuthority, 0, true));
         var san = new SubjectAlternativeNameBuilder();
         san.AddIpAddress(IPAddress.Parse(address));
         request.CertificateExtensions.Add(san.Build());
@@ -94,15 +145,56 @@ try
         using var publicOnly = X509CertificateLoader.LoadCertificate(certificate.RawData);
         var fixture = Path.Combine(directory, name + ".pfx");
         File.WriteAllBytes(fixture, (privateKey ? certificate : publicOnly).Export(X509ContentType.Pfx, password));
-        Reject(() => CertificateTools.LoadServerCertificate(fixture, password, "127.0.0.1"), name);
+        var result = InspectStatus(fixture, password, "127.0.0.1", expected);
+        if (expected == CertificateStatus.Ready)
+            Check(result.ExpiringSoon && result.Authority is null, "Seven-day warning must work with a valid independently supplied identity.");
     }
     var now = DateTimeOffset.UtcNow;
-    InvalidFixture("expired", now.AddDays(-3), now.AddDays(-1));
-    InvalidFixture("not-yet-valid", now.AddDays(1), now.AddDays(2));
-    InvalidFixture("missing-private-key", now.AddMinutes(-1), now.AddDays(1), privateKey: false);
-    InvalidFixture("missing-server-auth", now.AddMinutes(-1), now.AddDays(1), serverAuth: false);
-    InvalidFixture("wrong-ip-san", now.AddMinutes(-1), now.AddDays(1), address: "127.0.0.2");
+    InvalidFixture("expired", now.AddDays(-3), now.AddDays(-1), CertificateStatus.Expired);
+    InvalidFixture("not-yet-valid", now.AddDays(1), now.AddDays(2), CertificateStatus.NotYetValid);
+    InvalidFixture("missing-private-key", now.AddMinutes(-1), now.AddDays(1), CertificateStatus.NoPrivateKey, privateKey: false);
+    InvalidFixture("missing-server-auth", now.AddMinutes(-1), now.AddDays(1), CertificateStatus.WrongUsage, serverAuth: false);
+    InvalidFixture("wrong-ip-san", now.AddMinutes(-1), now.AddDays(1), CertificateStatus.AddressMismatch, address: "127.0.0.2");
+    InvalidFixture("authority-as-leaf", now.AddMinutes(-1), now.AddDays(1), CertificateStatus.WrongUsage, isAuthority: true);
+    InvalidFixture("expiring-soon", now.AddMinutes(-1), now.AddDays(6), CertificateStatus.Ready);
+    void AuthorityFixture(string name, bool certificateAuthority = true, X509KeyUsageFlags? keyUsage = X509KeyUsageFlags.KeyCertSign,
+        bool expired = false, bool exportPrivateKey = false, bool expected = false)
+    {
+        using var rootKey = RSA.Create(2048);
+        var rootRequest = new CertificateRequest("CN=LAN Drop isolated issuer " + name, rootKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(certificateAuthority, certificateAuthority, 0, true));
+        if (keyUsage is { } usage) rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(usage, true));
+        rootRequest.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(rootRequest.PublicKey, false));
+        using var root = rootRequest.CreateSelfSigned(now.AddDays(-3), expired ? now.AddDays(-1) : now.AddDays(10));
+        using var leafKey = RSA.Create(2048);
+        var leafRequest = new CertificateRequest("CN=LAN Drop isolated server " + name, leafKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        leafRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        leafRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+        leafRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new("1.3.6.1.5.5.7.3.1") }, true));
+        leafRequest.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(root, includeKeyIdentifier: true, includeIssuerAndSerial: false));
+        var san = new SubjectAlternativeNameBuilder();
+        san.AddIpAddress(IPAddress.Loopback);
+        leafRequest.CertificateExtensions.Add(san.Build());
+        // Signing directly allows invalid issuer fixtures without weakening the
+        // production chain checks or requiring access to an actual signing CA.
+        using var publicLeaf = leafRequest.Create(root.SubjectName, X509SignatureGenerator.CreateForRSA(rootKey, RSASignaturePadding.Pkcs1),
+            now.AddMinutes(-1), now.AddDays(6), RandomNumberGenerator.GetBytes(16));
+        using var leaf = publicLeaf.CopyWithPrivateKey(leafKey);
+        var fixture = Path.Combine(directory, name + ".pfx");
+        var companion = Path.ChangeExtension(fixture, ".ca.cer");
+        File.WriteAllBytes(fixture, leaf.Export(X509ContentType.Pfx, password));
+        File.WriteAllBytes(companion, root.Export(exportPrivateKey ? X509ContentType.Pfx : X509ContentType.Cert));
+        var inspected = InspectStatus(fixture, password, "127.0.0.1", CertificateStatus.Ready);
+        Check((inspected.Authority is not null) == expected, "Adjacent CA verification was incorrect for " + name);
+        if (expected) Check(inspected.Authority!.Fingerprint == CertificateTools.Fingerprint(root), "Verified issuer fingerprint must match its own bytes.");
+    }
+    AuthorityFixture("valid-independent-issuer", expected: true);
+    AuthorityFixture("issuer-not-ca", certificateAuthority: false);
+    AuthorityFixture("issuer-no-key-cert-sign", keyUsage: X509KeyUsageFlags.DigitalSignature);
+    AuthorityFixture("issuer-no-key-usage", keyUsage: null);
+    AuthorityFixture("issuer-expired", expired: true);
+    AuthorityFixture("issuer-private-key-container", exportPrivateKey: true);
     Check(TrustedRoots().SequenceEqual(before), "Certificate generation/loading must never change Windows root trust.");
-    Console.WriteLine("PASS: certificate chain, public-only CA, server-only PFX, fingerprint, no trust-store mutation, no overwrite/partial-output residue, passwords, IPv4 SAN, validity, private key and server authentication.");
+    Console.WriteLine("PASS: certificate chain, public-only CA recovery, server-only PFX, safe typed inspection/errors, expiry warning, fingerprint, no trust-store mutation, no overwrite/partial-output residue, passwords, IPv4 SAN, validity, private key and server authentication.");
 }
 finally { Directory.Delete(directory, true); }

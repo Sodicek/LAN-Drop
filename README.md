@@ -9,7 +9,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 ## Current features
 
 - Native Windows WPF window, network interface selection and explicit start/stop sharing.
-- HTTPS phone connections, local certificate generation or PFX selection, and session-only certificate passwords. Administration stays on authenticated loopback HTTP.
+- HTTPS phone connections, local certificate generation or PFX selection, certificate preflight/expiry guidance, and session-only certificate passwords. Administration stays on authenticated loopback HTTP.
 - Locally generated QR code, approval on the PC, short-lived pairing and revocable sessions.
 - Incoming batch offers: check the phone, all names and total size on the PC, then accept or reject the selection before upload.
 - Individual recipients: each phone can list/download only files addressed to it.
@@ -22,6 +22,7 @@ LAN Drop is an early development preview built with C# / .NET 10. The Windows ap
 - Current-session transfer states, manual retry of unfinished selections and connection-recovery help.
 - Default loopback-only server; optional single selected IPv4 interface for phone access.
 - Upload concurrency and per-run byte/file limits.
+- Manual diagnostic export without addresses, names, paths or secrets; see [diagnostics](docs/DIAGNOSTICS.md) ([česky](docs/cs/DIAGNOSTICS.md)).
 - Desktop network diagnostics, a start-time private/domain profile gate and periodic monitoring that stops unsafe sharing.
 - Free-space checks, concurrent disk reservations and path checks that reject reparse points.
 
@@ -75,7 +76,7 @@ English is the default. Choose **Čeština** or **Automatic** independently on t
 ./scripts/Publish-Portable.ps1
 ```
 
-The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.2-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
+The output is `publish/LAN-Drop-<version>-win-x64/` (currently `LAN-Drop-0.2.0-rc.3-win-x64`). Each version gets its own folder so building a new preview does not overwrite a running older preview. Run `LanDrop.Desktop.exe` and keep the bundled `Server` folder alongside it. The self-contained package does not require the SDK on the recipient PC. The package is currently unsigned; an installer, trusted updates and code signing are planned.
 
 Run `./scripts/Package-Release.ps1` after publishing to create a ZIP and its SHA-256 checksum. Candidate release notes and the [release test matrix](docs/RELEASE-TEST-MATRIX.md) explain which checks are automated and which still require real phones and clean Windows.
 
@@ -87,6 +88,7 @@ python tests/integration.py
 python tests/batches.py
 python tests/storage_safety.py
 dotnet run --project tests/Transport -c Release
+dotnet run --project tests/Diagnostics -c Release
 python tests/secure_transport.py
 node tests/localization.cjs
 node tests/progress.cjs

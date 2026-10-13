@@ -1,6 +1,6 @@
 # HTTPS setup
 
-The Windows app defaults to HTTPS for phone connections in 0.2.0-rc.2. Its administration channel remains authenticated HTTP on loopback only. The desktop chooses separate available ports and the phone's QR includes the HTTPS port. The browser-only server defaults to administration port 45821 and HTTPS port 45822. Secure mode does not expose a plaintext LAN listener or fall back to HTTP after a certificate error.
+The Windows app defaults to HTTPS for phone connections in 0.2.0-rc.3. Its administration channel remains authenticated HTTP on loopback only. The desktop chooses separate available ports and the phone's QR includes the HTTPS port. The browser-only server defaults to administration port 45821 and HTTPS port 45822. Secure mode does not expose a plaintext LAN listener or fall back to HTTP after a certificate error.
 
 HTTPS requires the phone to trust the certificate authority that issued the PC's certificate. A QR code alone cannot establish that trust. The app neither installs a root certificate nor bypasses browser certificate checks. Physical Android/iPhone setup remains unverified; this candidate is not a stable compatibility guarantee.
 
@@ -8,12 +8,14 @@ HTTPS requires the phone to trust the certificate authority that issued the PC's
 
 1. Select the private/domain network interface that the phone can reach. Keep **Secure HTTPS** enabled.
 2. Enter a new certificate password of at least twelve characters, then choose **Create local certificate** and a new `.pfx` file location on the PC. Existing output files are not overwritten. Prefer a local folder available only to your Windows account.
-3. Keep the `.pfx` and its password on the PC. The adjacent `.ca.cer` contains only the public authority certificate; it is the only generated file to transfer to the phone. The app displays its SHA-256 fingerprint, which can be copied with the public certificate details.
+3. Keep the `.pfx` and its password on the PC. Choose **Check certificate** to verify the local identity and see its expiry and IP addresses. The adjacent `.ca.cer` contains only the public authority certificate; it is the only generated file to transfer to the phone. The app displays its SHA-256 fingerprint, which can be copied with the public certificate details. After restarting, check the certificate again to restore those details after local chain verification.
 4. Transfer the public `.ca.cer` through a trusted method, such as directly from the PC using your normal cable/file-transfer procedure. Verify its origin and SHA-256 fingerprint against the PC before trusting it. Do not obtain the initial trust certificate from an unauthenticated LAN download. Never send the `.pfx` or its password to the phone.
 5. Install and explicitly trust the public authority using the phone's certificate settings. Managed devices may prohibit this; follow your administrator's instructions. If browser validation fails, stop and check the certificate, selected IP address, expiry and device trust instead of continuing through the warning.
 6. Start sharing, scan the HTTPS QR, then approve the phone on Windows. The phone page displays its connection mode.
 
 The app remembers the selected certificate path and HTTPS preference. It does not save the password; enter it again after restarting. Generated identities expire after thirty days and cover only the selected IPv4 address. Changing that address or renewing the identity requires a new certificate and manually replacing the phone's trusted public authority.
+
+**Start sharing** also checks the local certificate before launching the server. A local Ready result does not establish phone trust. The app warns when seven days or less remain and periodically stops sharing after active certificate expiry. See [connection checks and diagnostic export](DIAGNOSTICS.md) for error recovery.
 
 The signing key for the local authority is never exported and is disposed after issuing the server certificate. This means an existing authority cannot be used to renew another certificate. The server PFX protects its leaf key with AES-256/SHA-256 password encryption. Windows HTTPS imports that leaf key into the user's cryptographic provider temporarily because Schannel cannot use the ephemeral-key loading mode; normal certificate disposal releases it, but forced process termination can leave provider artifacts. No authority trust store is modified by the application.
 

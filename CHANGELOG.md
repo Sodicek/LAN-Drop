@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0-rc.3 — 2026-10-13
+
+### Added
+- Certificate preflight with EN/CS explanations for missing input, invalid password/file, validity, IP and server-usage failures.
+- Certificate IP/expiry summary, seven-day renewal warning and periodic stop on active certificate expiry.
+- Verified companion public authority details after restarting and checking a certificate; no automatic phone trust installation.
+- Manual local diagnostic JSON export with a strict whitelist of versions, categories, check status and counts; no addresses, names, paths, files, fingerprints, credentials or logs.
+- Certificate inspection/companion-chain tests, diagnostic privacy checks and expanded native lifecycle proofs.
+
+### Known gaps
+- Physical phone certificate installation and real Android/iPhone HTTPS remain release gates.
+- Local preflight does not verify phone trust or network reachability; periodic monitoring can be delayed.
+- Distribution remains unsigned and clean-machine/firewall/background checks remain pending.
+
 ## 0.2.0-rc.2 — 2026-10-11
 
 ### Added

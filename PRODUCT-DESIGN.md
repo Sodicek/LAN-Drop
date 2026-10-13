@@ -1,6 +1,6 @@
 # LAN Drop product design
 
-Updated: 2026-10-11. This document separates product targets from implemented features. See README for the current preview.
+Updated: 2026-10-13. This document separates product targets from implemented features. See README for the current preview.
 
 ## Product promise
 
