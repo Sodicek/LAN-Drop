@@ -20,4 +20,6 @@ Only completed PC saves and outgoing preparations are recorded. Pending, failed 
 
 The history store uses a bounded, validated JSON checkpoint and a writer lease. Another server using the same app data directory cannot write concurrently. If storage is unavailable, malformed or redirected, history reports an error without failing normal transfers or silently replacing unknown/corrupt data. Review the local history status; [diagnostics](DIAGNOSTICS.md) contains no raw history file or credentials.
 
+Custom application-data and receive directories must be separate from the configured public web-root directory. Overlapping paths are rejected before private storage is created there. The default Windows app uses its private local application data directory.
+
 The app validates storage paths but does not claim protection from hostile local path replacement, power-loss durability, secure disk erasure or other users with access to the Windows account. Queues remain current-run only and transfers are not resumable. Physical phone and clean Windows tests still require verification.

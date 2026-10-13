@@ -61,6 +61,12 @@ long reservedBytes = 0;
 var maxRegisteredFiles = Math.Max(1, builder.Configuration.GetValue("MaxRegisteredFiles", 1000));
 var reservedFiles = 0;
 var storage = Path.GetFullPath(builder.Configuration["DataDirectory"] ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LanDrop"));
+var publicWebRoot = app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+StorageSafety.ValidatePrivateFolder(storage, publicWebRoot);
+// Use the same physical root for validation and serving. Development manifests
+// can otherwise add source directories behind a custom web-root configuration.
+using var physicalPublicFiles = Directory.Exists(publicWebRoot) ? new Microsoft.Extensions.FileProviders.PhysicalFileProvider(publicWebRoot) : null;
+Microsoft.Extensions.FileProviders.IFileProvider publicFiles = physicalPublicFiles is null ? new Microsoft.Extensions.FileProviders.NullFileProvider() : physicalPublicFiles;
 StorageSafety.CreateFolder(storage);
 var diskSafetyBuffer = Math.Max(0, builder.Configuration.GetValue<long>("DiskSafetyBufferBytes", 64L * 1024 * 1024));
 var diskReservations = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
@@ -68,13 +74,13 @@ var settingsPath = Path.Combine(storage, "settings.json");
 var inbox = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "LAN-Drop");
 if (File.Exists(settingsPath))
 {
-    try { var saved = JsonSerializer.Deserialize<FolderRequest>(File.ReadAllText(settingsPath)); if (saved is not null && Path.IsPathFullyQualified(saved.Path) && !saved.Path.StartsWith(@"\\")) inbox = StorageSafety.CreateFolder(saved.Path); }
+    try { var saved = JsonSerializer.Deserialize<FolderRequest>(File.ReadAllText(settingsPath)); if (saved is not null && Path.IsPathFullyQualified(saved.Path) && !saved.Path.StartsWith(@"\\")) inbox = StorageSafety.CreateFolder(StorageSafety.ValidatePrivateFolder(saved.Path, publicWebRoot)); }
     catch (Exception e) when (e is IOException or JsonException or ArgumentException or UnsafeStorageException or UnauthorizedAccessException) { }
 }
 var outboxRoot = StorageSafety.CreateFolder(Path.Combine(storage, "Outbox"));
 StorageSafety.CleanupOutboxes(outboxRoot);
 var outbox = Path.Combine(outboxRoot, Secret()[..12]);
-StorageSafety.CreateFolder(inbox);
+StorageSafety.CreateFolder(StorageSafety.ValidatePrivateFolder(inbox, publicWebRoot));
 var outboxLease = StorageSafety.CreateRunLease(outbox);
 using var incomingStorage = new IncomingStorage();
 incomingStorage.Prepare(inbox);
@@ -155,7 +161,8 @@ app.Use(async (c, next) =>
     catch (OperationCanceledException) when (linked.IsCancellationRequested) { c.Abort(); }
     finally { c.RequestAborted = original; }
 });
-app.UseDefaultFiles(); app.UseStaticFiles();
+app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = publicFiles });
+app.UseStaticFiles(new StaticFileOptions { FileProvider = publicFiles });
 app.MapGet("/api/admin", (HttpContext c) =>
 {
     if (!IsAdmin(c)) return Results.Unauthorized();
@@ -216,7 +223,7 @@ app.MapPost("/api/admin/folder", (HttpContext c, FolderRequest request) =>
     try
     {
         if (!Path.IsPathFullyQualified(request.Path) || request.Path.StartsWith(@"\\")) return Results.BadRequest(Error("invalid_folder", "Choose an absolute local folder path."));
-        var path = StorageSafety.CreateFolder(request.Path);
+        var path = StorageSafety.CreateFolder(StorageSafety.ValidatePrivateFolder(request.Path, publicWebRoot));
         incomingStorage.Prepare(path, retryRecovery: true);
         lock (gate) { File.WriteAllText(settingsPath + ".tmp", JsonSerializer.Serialize(new FolderRequest(path))); File.Move(settingsPath + ".tmp", settingsPath, true); inbox = path; }
         return Results.Ok();

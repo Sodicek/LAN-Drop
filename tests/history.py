@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Server:
-    def __init__(self, data):
+    def __init__(self, data, development=False, **config):
         data = Path(data)
         data.mkdir(parents=True, exist_ok=True)
         if not (data / "settings.json").exists():
@@ -29,11 +29,14 @@ class Server:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         self.base = f"http://127.0.0.1:{port}"
+        environment = os.environ.copy()
+        if development:
+            environment["ASPNETCORE_ENVIRONMENT"] = "Development"
         lines = queue.Queue()
         self.process = subprocess.Popen([
             "dotnet", str(ROOT / "src/LanDrop/bin/Release/net10.0/LanDrop.dll"),
             f"--Port={port}", "--OpenBrowser=false", "--ListenAddress=127.0.0.1",
-            f"--DataDirectory={data}"], cwd=ROOT / "src/LanDrop",
+            f"--DataDirectory={data}", *[f"--{key}={value}" for key, value in config.items()]], cwd=ROOT / "src/LanDrop", env=environment,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             encoding="utf-8", errors="replace")
         threading.Thread(target=lambda: [lines.put(line) for line in self.process.stdout], daemon=True).start()
@@ -112,6 +115,32 @@ def main():
     with tempfile.TemporaryDirectory(prefix="landrop-history-") as directory:
         root = Path(directory)
         try:
+            public = root / "public-assets"; public.mkdir()
+            probe = public / "probe.json"; probe.write_bytes(b'{"public":true}')
+            isolated = Server(root / "private-assets-test", webroot=public); servers.append(isolated)
+            assert isolated.request("/probe.json", raw=True) == probe.read_bytes(), "Fixture must exercise the actual public web root"
+            for destination in (public, public / "nested", root):
+                rejected = isolated.request("/api/admin/folder", "POST", {"path": str(destination)}, isolated.admin, expected=400)
+                assert rejected["code"] == "unsafe_folder"
+            assert not (public / "nested").exists()
+            isolated.request("/api/admin/history/settings", "POST", {"enabled": True}, isolated.admin)
+            isolated.request("/History/history.json", expected=404, raw=True)
+            isolated.stop()
+            development = Server(root / "private-development", development=True, webroot=public); servers.append(development)
+            assert development.request("/probe.json", raw=True) == probe.read_bytes()
+            development.request("/app.js", expected=404, raw=True)
+            development.stop()
+            for unsafe_data in (public, public / "private-data", root):
+                with socket.socket() as listener:
+                    listener.bind(("127.0.0.1", 0)); bad_port = listener.getsockname()[1]
+                rejected = subprocess.run(["dotnet", str(ROOT / "src/LanDrop/bin/Release/net10.0/LanDrop.dll"),
+                    f"--Port={bad_port}", "--OpenBrowser=false", "--ListenAddress=127.0.0.1",
+                    f"--DataDirectory={unsafe_data}", f"--webroot={public}"], cwd=ROOT / "src/LanDrop",
+                    capture_output=True, timeout=20)
+                assert rejected.returncode != 0, "Private data must not overlap public assets"
+                with socket.socket() as listener:
+                    assert listener.connect_ex(("127.0.0.1", bad_port)) != 0
+            assert sorted(p.name for p in public.iterdir()) == ["probe.json"], "Rejected storage must not publish metadata or create folders"
             data = root / "normal"
             server = Server(data); servers.append(server)
             session, device = server.pair()

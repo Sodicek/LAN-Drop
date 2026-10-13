@@ -24,6 +24,8 @@ Optional persistent local completion history is off by default. It stores at mos
 
 No automatic opening of received files, router port mapping or telemetry. Server startup console output contains an administrator secret and must not be shared.
 
+App-data storage and receive folders cannot overlap the configured public web root in either direction; redirected public roots are also rejected by storage path validation. Static middleware uses that same physical root even in Development, avoiding extra source roots from asset manifests. This prevents normal custom-folder configuration from publishing private history, settings, staging or received files as static web assets. Choose a separate private local directory for `DataDirectory`; this does not control other Windows/network shares or defeat hostile local path tampering.
+
 Uploads require a sender SHA-256 checksum. The server compares the streamed bytes and rereads the closed temporary file before committing it. Clients require a matching completion receipt. This detects accidental corruption; it does not authenticate unencrypted HTTP or stop an attacker replacing both data and checksum. Verification is at commit time, not a guarantee about later edits, Safari downloads or persistence after power loss.
 
 Desktop sharing checks the selected Windows profile before starting and blocks public/unknown profiles. While sharing, a bounded background query runs every fifteen seconds; an unavailable address or public/unknown profile stops the server. Detection is periodic and can be delayed. The browser-only server does not apply this gate or monitoring. Diagnostics do not modify firewall rules or prove reachability.

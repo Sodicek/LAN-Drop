@@ -7,6 +7,7 @@
 - Read-only history before sharing starts, separate from current-run activity and download permissions.
 - Disable-with-retention and metadata-only clearing that preserves files and live access.
 - Bounded validated history checkpoints, exclusive writer lease and history-only failure handling.
+- Reject app-data and receive destinations that overlap the configured public web root, before creating private storage there.
 - English/Czech history controls and real restart, privacy, clear, concurrency, corruption and 201-completion limit checks.
 
 ### Known gaps

@@ -17,3 +17,5 @@ Příchozí záznam znamená, že počítač ověřil délku, otisk a uložená 
 Čekající, zrušené a neúspěšné přenosy se mezi dokončené nezapisují. Zápis historie je nezávislý na samotném uložení souboru. Pád nebo chyba úložiště mezi dokončením souboru a zápisem záznamu může znamenat, že soubor existuje bez řádku v historii. Před opakováním přenosu po ztracené odpovědi proto zkontroluj cílovou složku.
 
 Úložiště je omezené a chráněné proti současnému zápisu dvou serverů se stejnými daty. Poškozený, přesměrovaný nebo nedostupný soubor se bez upozornění nepřepisuje a chyba historie neblokuje běžné přenosy. Nejde o ochranu před jiným místním programem měnícím cesty ani záruku odolnosti proti výpadku napájení či bezpečného vymazání disku. Fronta je stále omezená na aktuální běh a soubor se po přerušení posílá znovu.
+
+Vlastní datová a cílová složka musí být oddělená od veřejné složky webové části. Překrývající se cesty aplikace odmítne před vytvořením soukromých dat. Běžné spuštění aplikace používá místní uživatelská data ve Windows.

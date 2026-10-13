@@ -31,6 +31,17 @@ static class StorageSafety
         Directory.CreateDirectory(full);
         return ValidateFolder(full);
     }
+    public static string ValidatePrivateFolder(string path, string webRoot)
+    {
+        var full = Path.TrimEndingDirectorySeparator(ValidateFolder(path));
+        var publicRoot = Path.TrimEndingDirectorySeparator(ValidateFolder(webRoot));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var fullPrefix = Path.EndsInDirectorySeparator(full) ? full : full + Path.DirectorySeparatorChar;
+        var publicPrefix = Path.EndsInDirectorySeparator(publicRoot) ? publicRoot : publicRoot + Path.DirectorySeparatorChar;
+        if (full.Equals(publicRoot, comparison) || full.StartsWith(publicPrefix, comparison)
+            || publicRoot.StartsWith(fullPrefix, comparison)) throw new UnsafeStorageException();
+        return full;
+    }
     public static string Volume(string path) => Path.GetPathRoot(ValidateFolder(path))!;
     public static long AvailableBytes(string volume) => new DriveInfo(volume).AvailableFreeSpace;
 
